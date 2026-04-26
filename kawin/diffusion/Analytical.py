@@ -47,6 +47,7 @@ class SemianalyticalModel(DiffusionModel):
                  dt_eps = 1e-9,
                  dx_max = 1e-3,
                  dt_max = 1e8,
+                 force_negative_eigenvalues = True,
                  record = False):
         super().__init__(mesh=mesh, elements=elements, phases=phases,
                          thermodynamics=thermodynamics,
@@ -56,6 +57,7 @@ class SemianalyticalModel(DiffusionModel):
         self.dt_eps = dt_eps
         self.dx_max = dx_max
         self.dt_max = dt_max
+        self.force_negative_eigenvalues = force_negative_eigenvalues
         # very large value that's below overflow
         self.max_exp_val = 1e300
 
@@ -88,7 +90,15 @@ class SemianalyticalModel(DiffusionModel):
         self.A = build_matrix(self.mesh, x, D)
         self.lam, self.ev = np.linalg.eig(self.A)
         self.c = np.matmul(np.linalg.inv(self.ev), uflat)
-        #print(np.amax(self.lam), np.amin(self.lam), np.amax(self.ev), np.amin(self.ev))
+        # in the case of back diffusion or negative cross diffusion terms,
+        # there's the possibility of positve eigenvalues which can destabilize
+        # the solution. I think this can also cause the analytical model to
+        # overpredict back diffusion. So this would remove all positive
+        # eigenvalues. Note that back diffusion is still possible if all
+        # the eigenvalues are still negative
+        if self.force_negative_eigenvalues:
+            self.lam[self.lam>0] = 0
+
         if np.any(self.lam>0):
             max_possible_time = np.real(np.amin(np.log(self.max_exp_val)/self.lam[self.lam>0]))
         else:
