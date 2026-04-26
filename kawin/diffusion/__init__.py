@@ -1,4 +1,5 @@
 from .SinglePhase import SinglePhaseModel
 from .Homogenization import HomogenizationModel
+from .Analytical import SemianalyticalModel
 from .DiffusionParameters import HashTable, TemperatureParameters, computeMobility
 from .HomogenizationParameters import HomogenizationParameters, computeHomogenizationFunction

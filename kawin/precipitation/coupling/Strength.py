@@ -72,7 +72,7 @@ class DislocationParameters:
     def tension(self, r0, theta = None):
         theta = self.theta if theta is None else theta
         return self.G*self.b**2 / (4*np.pi) * (1 + self.nu - 3*self.nu*np.sin(theta)**2) / (1 - self.nu) * np.log(r0 / self.ri)
-    
+
 ShearingStrength = namedtuple('ShearingStrength', ['weak', 'strong'])
 
 class StrengthContributionBase(ABC):
@@ -83,14 +83,14 @@ class StrengthContributionBase(ABC):
 
     def r0Weak(self, Ls, dislocations: DislocationParameters):
         return Ls / np.sqrt(np.cos(dislocations.psi / 2))
-    
+
     def r0Strong(self, Ls, dislocations: DislocationParameters):
         return Ls
 
     @abstractmethod
     def computeCRSS(self, r, Ls, dislocations: DislocationParameters):
         raise NotImplementedError()
-    
+
 class OrowanContribution(StrengthContributionBase):
     '''
     Orowan strengthening contribution
@@ -104,7 +104,7 @@ class OrowanContribution(StrengthContributionBase):
         nu = dislocations.nu
         ri = dislocations.ri
         return G*b / (2*np.pi*np.sqrt(1 - nu)*Ls) * np.log(2*r/ri)
-    
+
 class CoherencyContribution(StrengthContributionBase):
     '''
     Parameters for coherency effect
@@ -180,7 +180,7 @@ class ModulusContribution(StrengthContributionBase):
         weak = 2*tensionWeak/(b*Ls) * np.power(self.f(r, G, b)/(2*tensionWeak), 3/2)
         strong = self.f(r, G, b)/(b*Ls)
         return ShearingStrength(weak=weak, strong=strong)
-    
+
 class APBContribution(StrengthContributionBase):
     '''
     Parameters for anti-phase boundary effect for ordered precipitates in a disordered matrix
@@ -216,7 +216,7 @@ class APBContribution(StrengthContributionBase):
         weak = 2/(self.s*b*Ls) * (2*tensionWeak*np.power(r*self.yAPB/tensionWeak, 3/2) - 16*self.beta*self.yAPB*r**2/(3*np.pi*Ls))
         strong = 0.69/(b*Ls) * np.sqrt(8*self.V*tensionStrong*r*self.yAPB/3)
         return ShearingStrength(weak=weak, strong=strong)
-    
+
 class SFEContribution(StrengthContributionBase):
     '''
     Parameters for stacking fault energy effect
@@ -288,7 +288,7 @@ class InterfacialContribution(StrengthContributionBase):
         weak = 2*tensionWeak/(b*Ls)*np.power(self.gamma*b/tensionWeak, 3/2)
         strong = 2*self.gamma/Ls
         return ShearingStrength(weak=weak, strong=strong)
-    
+
 class SolidSolutionStrength:
     '''
     Model for solid solution strengthening
@@ -303,7 +303,7 @@ class SolidSolutionStrength:
     def __init__(self, weights = {}, exp = {}):
         self.weights = weights
         self.exp = exp
-    
+
     def compute(self, composition, elements):
         composition = np.atleast_2d(composition)
         val = np.zeros(len(composition))
@@ -311,7 +311,7 @@ class SolidSolutionStrength:
             e = elements[i]
             val += np.power(self.weights.get(e,0)*composition[:,i], self.exp.get(e,1))
         return np.squeeze(val)
-    
+
 def computeCRSS(rss, Ls, contributions: list[StrengthContributionBase], dislocations: DislocationParameters, phase):
     '''
     Computes critical resolved shear stress from precipitate contributions over rss, Ls
@@ -351,7 +351,7 @@ def computeCRSS(rss, Ls, contributions: list[StrengthContributionBase], dislocat
 
     orowan = np.squeeze(OrowanContribution().computeCRSS(rss, Ls, dislocations))
     return weakValues, strongValues, orowan
-    
+
 def combineCRSS(weak, strong, owo, exp = 1.8, returnContributions = False):
     '''
     Sums the different critical resolved shear stress contributions together
@@ -365,13 +365,13 @@ def combineCRSS(weak, strong, owo, exp = 1.8, returnContributions = False):
             con = np.array(list(contribution.values()))
             conSum = np.power(np.sum(np.power(con, exp), axis=0), 1/exp)
         return conSum
-    
+
     # ensures that array is 1d and all negative/undefined values are 0
     def processArray(contribution):
         contribution = np.atleast_1d(contribution)
         contribution[(contribution < 0) | ~np.isfinite(contribution)] = 0
         return contribution
-    
+
     owo = processArray(owo)
     weakSum = processArray(sumArray(weak))
     strongSum = processArray(sumArray(strong))
@@ -381,7 +381,7 @@ def combineCRSS(weak, strong, owo, exp = 1.8, returnContributions = False):
         return np.squeeze(taumin), np.squeeze(weakSum), np.squeeze(strongSum), np.squeeze(owo)
     else:
         return np.squeeze(taumin)
-    
+
 class StrengthModel:
     '''
     Strength model for coupling with precipitate model
@@ -399,10 +399,10 @@ class StrengthModel:
         Base strength of all
         Default is 0
     '''
-    def __init__(self, phases: list[PrecipitateParameters | str], 
-                 contributions: StrengthContributionBase | list[StrengthContributionBase], 
+    def __init__(self, phases: list[PrecipitateParameters | str],
+                 contributions: StrengthContributionBase | list[StrengthContributionBase],
                  dislocations: DislocationParameters,
-                 ssModel: SolidSolutionStrength = None, 
+                 ssModel: SolidSolutionStrength = None,
                  sigma0: float = 0):
         if isinstance(phases, PrecipitateParameters) or isinstance(phases, str):
             phases = [phases]
@@ -447,7 +447,7 @@ class StrengthModel:
         data = np.load(filename)
         self.rss = data['rss']
         self.Ls = data['Ls']
-    
+
     def updateCoupledModel(self, model: PrecipitateModel):
         '''
         Computes rss and Ls from current state of the PrecipitateModel
@@ -471,7 +471,7 @@ class StrengthModel:
             r2 = model.PBM[p].secondMoment()
             if r1 > 0:
                 rss[p] = np.sqrt(2/3) * r2 / r1
-                Ls[p] = np.sqrt(np.log(3) / (2*np.pi*r1) + (2*rss)**2) - 2*rss
+                Ls[p] = np.sqrt(np.log(3) / (2*np.pi*r1) + (2*rss[p])**2) - 2*rss[p]
 
         self.rss = np.append(self.rss, [rss], axis=0)
         self.Ls = np.append(self.Ls, [Ls], axis=0)
@@ -488,7 +488,7 @@ class StrengthModel:
         for i in range(len(model.phases)):
             weak, strong, owo = computeCRSS(self.rss[:,i], self.Ls[:,i], self.contributions, self.dislocations, model.phases[i])
             strength, weakSum, strongSum, owo = combineCRSS(weak, strong, owo, self.singlePhaseExp, True)
-            
+
             # if weak is larger than strong or orowan contributions, then add to compare
             compare = (weakSum > strongSum) & (weakSum > owo)
             compare[~np.isfinite(strength)] = 0
@@ -503,7 +503,7 @@ class StrengthModel:
         totalStrength[indices] = np.power(np.sum(np.power(ps[:,indices], self.multiphaseSameExp), axis=0), 1/self.multiphaseSameExp)
         totalStrength[~indices] = np.power(np.sum(np.power(ps[:,~indices], self.multiphaseMixedExp), axis=0), 1/self.multiphaseMixedExp)
         return self.M*totalStrength
-    
+
     def totalStrength(self, model: PrecipitateModel, returnContributions = False):
         '''
         Compute total strength from precipitate, solid solution and base contributions
@@ -539,7 +539,7 @@ def _get_strength_units(units = 'Pa'):
 def _plotContributionOverX(x, r, Ls, contribution: StrengthContributionBase, dislocations: DislocationParameters, strengthUnits='MPa', ax=None, *args, **kwargs):
     '''
     Plots single strengthening contribution
-    
+
     Parameters
     ----------
     x: np.array

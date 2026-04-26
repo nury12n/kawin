@@ -203,9 +203,9 @@ class HomogenizationParameters:
     MAJORITY = 7
     EXCLUDE = 8
 
-    def __init__(self, 
-                 homogenizationFunction: Union[str,int] = 'wiener upper', 
-                 labyrinthFactor: float = 1, 
+    def __init__(self,
+                 homogenizationFunction: Union[str,int] = 'wiener upper',
+                 labyrinthFactor: float = 1,
                  eps: float = 0.05,
                  postProcessFunction: Union[str, int] = 'none',
                  postProcessArgs = None):
@@ -243,7 +243,7 @@ class HomogenizationParameters:
         if functionName in keywords_map:
             self._setPostProcessFunctionByID(keywords_map[functionName])
             return
-        
+
         str_options = ', '.join(list(keywords_map.keys()))
         raise Exception(f'Error: post process function by str should be {str_options}')
 
@@ -260,7 +260,7 @@ class HomogenizationParameters:
             func_types = ['NO_POST', 'PREDEFINED', 'MAJORITY', 'EXCLUDE']
             int_options = ', '.join([f'HomogenizationParameters.{t}' for t in func_types])
             raise Exception(f'Error: post process function by ID should be {int_options}')
-            
+
     def setHomogenizationFunction(self, function: Union[str, int]):
         '''
         Sets averaging function to use for mobility
@@ -289,7 +289,7 @@ class HomogenizationParameters:
             if all([kw in function for kw in keywords]):
                 self._setHomogenizationFunctionByID(func_id)
                 return
-        
+
         func_types = ['wiener upper', 'wiener lower', 'hashin upper', 'hashin lower', 'labyrinth']
         str_options = ', '.join(func_types)
         raise Exception(f'Error: homogenization function by str should be {str_options}')
@@ -337,7 +337,7 @@ def computeHomogenizationFunction(therm : GeneralThermodynamics, x, T, homogeniz
         Temperature(s)
         First dimensions must correspond to first dimension of x
     diffusion_parameters: DiffusionParameters
-        
+
     Returns
     -------
     average mobility array - (N, e)

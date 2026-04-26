@@ -35,21 +35,21 @@ class SinglePhaseModel(DiffusionModel):
         # For binary systems, we only have 1 independent component
         if numElements == 1:
             pairs.append(DiffusionPair(
-                diffusivity=d[:,np.newaxis], 
-                response=yR, 
+                diffusivity=d[:,np.newaxis],
+                response=yR,
                 averageFunction=arithmeticMean))
         else:
             # For 2+ independent component, we want to tile x_j from (1,N) -> (e,N) -> (N,e)
             for i in range(len(self.elements)):
                 pairs.append(DiffusionPair(
-                    diffusivity=d[:,:,i], 
-                    response=np.tile([yR[:,i]], (numElements, 1)).T, 
+                    diffusivity=d[:,:,i],
+                    response=np.tile([yR[:,i]], (numElements, 1)).T,
                     averageFunction=arithmeticMean
                     ))
                 #pairs.append((d[:,:,i], np.tile([yR[:,i]], (numElements, 1)).T, arithmeticMean))
-        self._currdt = 0.4 * self.mesh.dz**2 / np.amax(d) / self.mesh.dims
+        self._currdt = self.constraints.vonNeumannThreshold * self.mesh.dz**2 / np.amax(np.abs(d)) / self.mesh.dims
         return pairs
-    
+
     def getDt(self, dXdt):
         '''
         Returns dt that was calculated from _getPairs using von-Neumann stability
