@@ -4,7 +4,7 @@ from kawin.diffusion.Diffusion import DiffusionModel
 from kawin.diffusion.mesh.MeshBase import DiffusionPair, arithmeticMean
 from kawin.diffusion.mesh import Cartesian1D, MixedBoundary1D, PeriodicBoundary1D
 
-def build_matrix(mesh: Cartesian1D, x, D):
+def build_matrix(mesh: Cartesian1D, D):
     N = mesh.N
     num_elements = mesh.numResponses
     dz = mesh.dz
@@ -85,9 +85,9 @@ class SemianalyticalModel(DiffusionModel):
         if numElements == 1:
             D = np.reshape(D, (N,numElements,numElements))
 
-        uflat = flatten_x(x, N, numElements)
+        uflat = flatten_x(self.mesh.unflattenResponse(xCurr[0]), N, numElements)
         # store analytical solution in case we need to adjust time step
-        self.A = build_matrix(self.mesh, x, D)
+        self.A = build_matrix(self.mesh, D)
         self.lam, self.ev = np.linalg.eig(self.A)
         self.c = np.matmul(np.linalg.inv(self.ev), uflat)
         # in the case of back diffusion or negative cross diffusion terms,
@@ -136,4 +136,70 @@ class SemianalyticalModel(DiffusionModel):
         numElements = self.mesh.numResponses
         # if dt is modified, compute the new u-fraction and corresponding dx/dt
         unew = np.real(unflatten_x(np.matmul(self.ev, self.c*np.exp(self.lam*dt)), N, numElements))
+        return [(unew-x[0])/dt]
+
+class ImplicitEulerModel(DiffusionModel):
+    def __init__(self, mesh, elements, phases,
+                 thermodynamics = None,
+                 temperature = None,
+                 constraints = None,
+                 dx_max = 1e-2,
+                 record = False):
+        super().__init__(mesh=mesh, elements=elements, phases=phases,
+                         thermodynamics=thermodynamics,
+                         temperature=temperature,
+                         constraints=constraints,
+                         record=record)
+        self.dx_max = dx_max
+
+        assert isinstance(mesh, Cartesian1D), "Only Cartesian1D is supported"
+        if isinstance(mesh.boundaryConditions, MixedBoundary1D):
+            assert np.all(np.array(mesh.boundaryConditions.LBCtype) == MixedBoundary1D.NEUMANN) and np.all(np.array(mesh.boundaryConditions.LBCvalue)) == 0, "Only no flux or periodic BC are supported"
+            assert np.all(np.array(mesh.boundaryConditions.RBCtype) == MixedBoundary1D.NEUMANN) and np.all(np.array(mesh.boundaryConditions.RBCvalue)) == 0, "Only no flux or periodic BC are supported"
+
+    def getdXdt(self, t, xCurr):
+        '''
+        Computes dXdt from mesh and diffusivity-respones pairs
+        '''
+        # x is shape (N,e), so convert to mesh shape to obtain diffusion/response coordinates
+        u = expand_u_frac(xCurr[0], self.allElements, interstitials)
+        x = u_to_x_frac(u, self.allElements, interstitials)[:,1:]
+        x = self.mesh.unflattenResponse(x)
+        yD, zD = self.mesh.getDiffusivityCoordinates(x)
+
+        # get diffusivities
+        T = self.temperatureParameters(zD, t)
+        N = self.mesh.N
+        numElements = self.mesh.numResponses
+        yD, zD = self.mesh.getDiffusivityCoordinates(x)
+        D = self.therm.getInterdiffusivity(yD, T, phase=self.phases[0])
+        if numElements == 1:
+            D = np.reshape(D, (N,numElements,numElements))
+
+        uflat = flatten_x(self.mesh.unflattenResponse(xCurr[0]), N, numElements)
+        # store analytical solution in case we need to adjust time step
+        # (x_(i+1)-x_i)/dt = A*x_(i+1)
+        # (I - dt*A)*x_(i+1) = x_i
+        # x_(i+1) = (I-dt*A)^-1 * x_i
+        self.A = build_matrix(self.mesh, D)
+        dtpos = self.dx_max / np.matmul(self.A, uflat+self.dx_max)
+        dtneg = -self.dx_max / np.matmul(self.A, uflat-self.dx_max)
+        dttot = np.concatenate([dtpos, dtneg])
+        self._currdt = np.amin(dttot[dttot>0])
+        print(self._currdt, np.amin(dttot[dttot>0]), np.amax(dttot[dttot>0]))
+        inv_A = np.linalg.inv(np.eye(self.A.shape[0]) - self._currdt*self.A)
+        unew = unflatten_x(np.matmul(inv_A, uflat), N, numElements)
+        return [(unew-xCurr[0]).squeeze()/self._currdt]
+
+    def getDt(self, dXdt):
+        return self._currdt
+
+    def correctdXdt(self, dt, x, dXdt):
+        if dt == self._currdt:
+            return dXdt
+        N = self.mesh.N
+        numElements = self.mesh.numResponses
+        uflat = flatten_x(self.mesh.unflattenResponse(x[0]), N, numElements)
+        inv_A = np.linalg.inv(np.eye(self.A.shape[0]) - dt*self.A)
+        unew = unflatten_x(np.matmul(inv_A, uflat), N, numElements)
         return [(unew-x[0])/dt]
