@@ -28,7 +28,7 @@ jobs:
       run: python -m pip install git+https://github.com/pycalphad/pycalphad.git@develop#egg=pycalphad
     - name: Install espei development version
       if: matrix.pycalphad_develop_version
-      run: python -m pip install git+https://github.com/bocklund/ESPEI.git@260603-test#egg=espei
+      run: python -m pip install git+https://github.com/PhasesResearchLab/ESPEI.git@master#egg=espei
     - name: Save pycalphad version
       run: |
         echo "PYCALPHAD_VERSION=$(python -c "from importlib.metadata import version;print(version('pycalphad'))")" >> $GITHUB_ENV
