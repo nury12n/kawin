@@ -20,9 +20,9 @@ jobs:
         fetch-depth: 0  # fetch the entire repo history, required to guarantee setuptools_scm will pick up tags
     - name: Set env variables
       if: matrix.pycalphad_develop_version
-      env:
-        SETUPTOOLS_SCM_PRETEND_VERSION_FOR_PYCALPHAD: "1.0.0"
-        SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ESPEI: "1.0.0"
+      run: |
+        echo "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_PYCALPHAD=1.0.0" >> $GITHUB_ENV
+        echo "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ESPEI=1.0.0" >> $GITHUB_ENV
     - name: Set up Python
       uses: actions/setup-python@v6
       with:
