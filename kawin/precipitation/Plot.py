@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from kawin.PlotUtils import _get_axis, _adjust_kwargs
+from kawin.plot_utils import _get_axis, _adjust_kwargs
 from kawin.precipitation.PrecipitationParameters import PrecipitateParameters
 from kawin.precipitation.PopulationBalance import PopulationBalanceModel, plotPDF, plotPSD, plotCDF
 from kawin.precipitation import PrecipitateBase, PrecipitateModel
@@ -103,7 +103,7 @@ def _radius_scale(precipitate: PrecipitateParameters, radius, r):
     radius = radius.lower()
     if radius not in ['spherical', 'short', 'long']:
         raise ValueError("Radius must be \'spherical\', \'short\' or \'long\'")
-    
+
     scale = 1
     if precipitate.nucleation.isGrainBoundaryNucleation:
         scale = precipitate.nucleation.areaRemoval

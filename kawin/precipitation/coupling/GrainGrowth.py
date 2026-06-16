@@ -4,7 +4,7 @@ from kawin.GenericModel import GenericModel
 from kawin.solver import rk4Iterator
 from kawin.precipitation import PrecipitateModel
 from kawin.precipitation import PopulationBalanceModel
-from kawin.PlotUtils import _get_axis
+from kawin.plot_utils import _get_axis
 from kawin.precipitation.PopulationBalance import plotPSD, plotPDF, plotCDF
 from kawin.precipitation.Plot import _get_time_axis
 
@@ -53,7 +53,7 @@ class GrainGrowthModel(GenericModel):
 
         #Factors related to spatial distribution of precipitates
         self.m = m
-        self.K = K   
+        self.K = K
         self._mdefault = 1
         self._Kdefault = 4/3
 
@@ -66,7 +66,7 @@ class GrainGrowthModel(GenericModel):
     def loadDistribution(self, data):
         '''
         Creates a particle size distribution from a set of data
-        
+
         Parameters
         ----------
         data : array of floats
@@ -121,7 +121,7 @@ class GrainGrowthModel(GenericModel):
             Grain size distribution corresponding to GrainGrowthModel.pbm.PSDbounds
         '''
         return self.pbm.secondMoment(N=x) / self.pbm.firstMoment(N=x)
-    
+
     def Rm(self, x):
         '''
         Mean radius
@@ -132,7 +132,7 @@ class GrainGrowthModel(GenericModel):
             Grain size distribution corresponding to GrainGrowthModel.pbm.PSDbounds
         '''
         return np.cbrt(self.pbm.thirdMoment(N=x) / self.pbm.zeroMoment(N=x))
-    
+
     def grainGrowth(self, x):
         '''
         Grain growth model
@@ -144,7 +144,7 @@ class GrainGrowthModel(GenericModel):
             Grain size distribution corresponding to GrainGrowthModel.pbm.PSDbounds
         '''
         return self.alpha * self.M * self.gbe * (1 / self.Rcr(x) - 1 / self.pbm.PSDbounds)
-    
+
     def normalize(self):
         '''
         Normalize PSD to have a third moment of 1
@@ -163,7 +163,7 @@ class GrainGrowthModel(GenericModel):
             Where 1/Rz is added if (1/Rcr - 1/Ri) + 1/Rz < 0 (inhibits grain dissolution)
             And   1/Rz is subtracted in (1/Rcr - 1/Ri) - 1/Rz) > 0 (inhibits grain growth)
             And   dR/dt is 0 for Ri between these two limits
-        
+
         Note: Rather than Rz (zener radius), we use z here which represents the drag force
             But these are related by z = 1/Rz
 
@@ -182,13 +182,13 @@ class GrainGrowthModel(GenericModel):
         cG[growIndices] = lower[growIndices]
         cG[dissolveIndices] = upper[dissolveIndices]
         return cG
-    
+
     def getCurrentX(self):
         '''
         Returns current time and grain size distribution
         '''
         return [self.pbm.PSD]
-    
+
     def getdXdt(self, t, x):
         '''
         Returns dn_i/dt for the grain size distribution
@@ -234,13 +234,13 @@ class GrainGrowthModel(GenericModel):
         self.avgR = np.append(self.avgR, self.Rm(self.pbm.PSD))
         self.updateCoupledModels()
         return [self.pbm.PSD], False
-    
+
     def printHeader(self):
         '''
         Header string before solving
         '''
         print('Iteration\tTime(s)\t\tSim Time(s)\tGrain Size (um)')
-    
+
     def printStatus(self, iteration, modelTime, simTimeElapsed):
         '''
         Status string that prints every n iteration
@@ -277,7 +277,7 @@ class GrainGrowthModel(GenericModel):
 
             if avgR > 0:
                 z[p] += np.power(fBeta, m) / (K * avgR)
-            
+
         self._z = np.sum(z)
 
     def updateCoupledModel(self, model):

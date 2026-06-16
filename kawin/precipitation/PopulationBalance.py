@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-from kawin.PlotUtils import _get_axis, _adjust_kwargs
+from kawin.plot_utils import _get_axis, _adjust_kwargs
 
 class PopulationBalanceModel:
     '''

@@ -3,7 +3,7 @@ from typing import Union
 import numpy as np
 import matplotlib.pyplot as plt
 
-from kawin.PlotUtils import _get_axis, _adjust_kwargs
+from kawin.plot_utils import _get_axis, _adjust_kwargs
 from kawin.thermo.Mobility import u_to_x_frac, expand_u_frac, expand_x_frac, interstitials
 from kawin.diffusion.Diffusion import DiffusionModel
 from kawin.diffusion.DiffusionParameters import computeMobility, HashTable
@@ -127,7 +127,7 @@ def plot1DTwoAxis(model: DiffusionModel, elementsL, elementsR, zScale=1, zOffset
             elementLabel = f'[{elList}] '
         else:
             elementLabel = ''
-        ax.set_ylabel(f'Composition {elementLabel}(at.)') 
+        ax.set_ylabel(f'Composition {elementLabel}(at.)')
         ax.set_ylim([0,1])
 
     _set_1D_xlim(ax, mesh, zScale, zOffset)
@@ -162,7 +162,7 @@ def plot1DPhases(model: DiffusionModel, phases=None, zScale=1, zOffset=0, time=N
     '''
     ax = _get_axis(ax)
     mesh = _get_1D_mesh(model)
-    
+
     # Compute phase fraction
     T = model.temperatureParameters(mesh.z, model.currentTime)
     # Temporary hash table, since we don't want to interfere with the internal model hash
@@ -267,7 +267,7 @@ def plot2D(model: DiffusionModel, element, zScale=1, time=None, ax=None, plotUFr
     mesh: Cartesian2D = model.mesh
     if not isinstance(mesh, Cartesian2D):
         raise ValueError('Diffusion mesh must be Cartesian2D')
-    
+
     # make sure zScale has 2 elements (for x and y axis)
     zScale = np.atleast_1d(zScale)
     if zScale.shape[0] == 1:

@@ -2,14 +2,14 @@ from collections import namedtuple
 
 import numpy as np
 
-from kawin.Constants import AVOGADROS_NUMBER, BOLTZMANN_CONSTANT
+from kawin.constants import AVOGADROS_NUMBER, BOLTZMANN_CONSTANT
 from kawin.thermo import GeneralThermodynamics, BinaryThermodynamics, MulticomponentThermodynamics
 from kawin.thermo.utils import _process_xT_arrays
 from kawin.precipitation.PrecipitationParameters import MatrixParameters, PrecipitateParameters
 
 NucleationData = namedtuple('NucleationData', [
     'x', 'T',
-    'nucleation_rate', 'chemical_driving_force', 'volumetric_driving_force', 'Rcrit', 'Gcrit', 
+    'nucleation_rate', 'chemical_driving_force', 'volumetric_driving_force', 'Rcrit', 'Gcrit',
     'precipitate_composition', 'Z', 'beta', 'tau', 'nucleation_radius'])
 
 def volumetricDrivingForce(therm: GeneralThermodynamics, x, T, precipitate: PrecipitateParameters, aspectRatio = 1, removeCache = False):
@@ -94,7 +94,7 @@ def betaBinary2(therm : BinaryThermodynamics, x, T, Rcrit, matrix : MatrixParame
     T = np.atleast_1d(T)
     Rcrit = np.atleast_1d(Rcrit)
     indices = Rcrit != 0
-    
+
     if xEqAlpha is None:
         xEqAlpha, xEqBeta = therm.getInterfacialComposition(T[indices], np.zeros(T[indices].shape), precipitate.phase)
 

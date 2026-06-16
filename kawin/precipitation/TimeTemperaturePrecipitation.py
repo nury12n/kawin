@@ -1,5 +1,5 @@
 import numpy as np
-from kawin.PlotUtils import _get_axis, _adjust_kwargs
+from kawin.plot_utils import _get_axis, _adjust_kwargs
 from kawin.precipitation import PrecipitateModel
 from kawin.precipitation.StoppingConditions import PrecipitationStoppingCondition
 
@@ -46,7 +46,7 @@ class TTPCalculator:
             values[j] = self.stopConds[j].satisfiedTime()
 
         return values
-    
+
     def calculateTTP(self, Tlow, Thigh, Tsteps, maxTime, pool = None):
         '''
         Calculates TTP diagram between Tlow and Thigh
@@ -66,7 +66,7 @@ class TTPCalculator:
         pool : None or multiprocessing pool
             If None, each temperature will be evaluated in serial
             If a pool, must have a map function
-                Possible options: 
+                Possible options:
                     multiprocessing.Pool - (mac and unix only)
                     pathos.multiprocessing.ProcessingPool - (windows, mac and unix)
                     dask.Client - (windows, mac and unix)

@@ -1,6 +1,6 @@
 import numpy as np
 
-from kawin.Constants import AVOGADROS_NUMBER
+from kawin.constants import AVOGADROS_NUMBER
 from kawin.precipitation.PrecipitationParameters import PrecipitationData
 from kawin.precipitation.KWNBase import PrecipitateBase
 from kawin.precipitation.PopulationBalance import PopulationBalanceModel
