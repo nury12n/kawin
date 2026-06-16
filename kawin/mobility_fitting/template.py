@@ -12,7 +12,7 @@ from pycalphad import Database, Model, variables as v
 from pycalphad.codegen.phase_record_factory import PhaseRecordFactory
 from pycalphad.io.tdb import _molmass
 
-from kawin.thermo.LocalEquilibrium import local_equilibrium
+from kawin.thermo.thermodynamics import local_equilibrium
 from kawin.thermo.Mobility import MobilityModel
 from kawin.mobility_fitting.utils import _vname, _get_variable_terms, _eval_symengine_expr, find_last_variable
 
@@ -29,8 +29,8 @@ def _upsert_parameters(dbf: Database, parameter_type: str, phase: str, constitue
                     (query.parameter_order == parameter_order)
     param = dbf.search(search_query)
     if len(param) == 0:
-        dbf.add_parameter(parameter_type, phase, constituent_array, 
-                          parameter_order, function, 
+        dbf.add_parameter(parameter_type, phase, constituent_array,
+                          parameter_order, function,
                           diffusing_species=diffusing_species)
     else:
         # If parameter already exists, we can either add the function to the present paramter or overwrite it
@@ -103,11 +103,11 @@ class EquilibriumSiteFractionGenerator(SiteFractionGenerator):
         if active_comps not in self.models:
             self.models[active_comps] = {}
             self.phase_records[active_comps] = {}
-        
+
         if phase not in self.models[active_comps]:
             self.models[active_comps][phase] = {phase: Model(self.dbf, comps, phase)}
             self.phase_records[active_comps][phase] = PhaseRecordFactory(self.dbf, comps, {v.T, v.P, v.N, v.GE}, self.models[active_comps][phase])
-        
+
         return self.models[active_comps][phase], self.phase_records[active_comps][phase]
 
     def generate_site_fractions(self, phase: str, components: list[str], conditions : dict[v.StateVariable: float]) -> dict[v.Species: float]:
@@ -165,7 +165,7 @@ class MobilityTemplate:
             self.dbf.elements.update(list(sp.constituents.keys()))
 
         # Add reference state, this is to be compatible for phase records, but values aren't
-        # necessary since we intend to add the parameters to the thermodynamic database in the end  
+        # necessary since we intend to add the parameters to the thermodynamic database in the end
         for el in self.dbf.elements:
             self.dbf.refstates[el] = {'phase': phase, 'mass': _molmass.get(el, 0.0), 'H298': 0, 'S298': 0}
 
@@ -186,7 +186,7 @@ class MobilityTemplate:
         parameter_symbol = Symbol(_vname(self.num_params))
         self.num_params += 1
         return parameter_symbol
-    
+
     def _create_T_term(self) -> Basic:
         '''
         Creates a T dependent parameter symbol as VV00XX*T
@@ -202,9 +202,9 @@ class MobilityTemplate:
         for prod in itertools.product(*self.constituents):
             constituent_array = [[species] for species in prod]
             self.dbf.add_parameter('MQ', self.phase, constituent_array,
-                                   0, self._create_constant() + self._create_T_term(), 
+                                   0, self._create_constant() + self._create_T_term(),
                                    diffusing_species=self.diffusing_species)
-            
+
         # Not really needed since this function is called upon initialization, but to be safe since we modified the database here
         self._model = None
 
@@ -227,7 +227,7 @@ class MobilityTemplate:
             Defaults to 'MQ'
             Parameter symbol to add in database
             By default, we always use 'MQ', but this adds the option to create the 'MF' terms
-            if they the prefactor and activation energies need to be separate terms (i.e. for 
+            if they the prefactor and activation energies need to be separate terms (i.e. for
             magnetic contributions which are yet unsupported)
         '''
         if not isinstance(parameter_order, list):
@@ -241,14 +241,14 @@ class MobilityTemplate:
 
         for p in parameter_order:
             _upsert_parameters(self.dbf, parameter_type, self.phase, constituent_array, p, self.diffusing_species, param_func(), add_if_exists=True)
-        
+
         # Since we updated the database, clear the mobility model if it was made at some point
         self._model = None
 
     def add_prefactor(self, constituent_array: list, parameter_order: Union[int, list[int]], parameter_type: str = 'MQ', parameter = None):
         '''
         Adds a diffusion prefactor term (in form of VV00XX*T)
-            While the prefactor is defined as M0 in 
+            While the prefactor is defined as M0 in
                 M = M0/RT * exp(Q/RT),
             the prefactor is treated as part of the exponential term as
                 M = 1/RT * exp((MQ+MF)/RT) where MQ+MF = A+B*T
@@ -270,7 +270,7 @@ class MobilityTemplate:
         else:
             parameter = transform_prefactor(parameter)*v.T
         self.add_term(constituent_array, parameter_order, parameter, parameter_type=parameter_type)
-        
+
     def add_activation_energy(self, constituent_array: list, parameter_order: Union[int, list[int]], parameter_type: str='MQ', parameter = None):
         '''
         Adds a activation energy term (in form of VV00XX)
@@ -309,7 +309,7 @@ class MobilityTemplate:
         if len(param) > 0:
             p = param[0]
             self.dbf.add_parameter(p['parameter_type'], p['phase_name'], new_constituent_array,
-                                   p['parameter_order'], p['parameter'], 
+                                   p['parameter_order'], p['parameter'],
                                    diffusing_species=p['diffusing_species'])
 
     @property
@@ -329,7 +329,7 @@ class MobilityTemplate:
         if self._model is None:
             self._model = MobilityModel(self.dbf, self.elements, self.phase)
         return self._model
-    
+
     # mobility_function, MQ, pre_factor and activation_energy are wrappers to
     # retrieve the underlying functions in the MobilityModel directly
     @property
@@ -338,7 +338,7 @@ class MobilityTemplate:
         Mobility function: M = 1/RT * exp(-(MQ+MF)/RT)
         '''
         return getattr(self.model, f'MOB_{self.diffusing_species.name}')
-    
+
     @property
     def MQ(self) -> Basic:
         '''
@@ -353,7 +353,7 @@ class MobilityTemplate:
         This refers to all the T-dependent terms in MQ+MF
         '''
         return getattr(self.model, f'lnM0_{self.diffusing_species.name}')
-    
+
     @property
     def activation_energy(self) -> Basic:
         '''
@@ -361,7 +361,7 @@ class MobilityTemplate:
         This refers to all the constant terms in MQ+MF
         '''
         return getattr(self.model, f'MQa_{self.diffusing_species.name}')
-    
+
     def get_derivatives(self, function: Basic) -> DerivativePair:
         '''
         Creates derivative and corresponding variables for function (would be either lnM0 or Q)
@@ -376,7 +376,7 @@ class MobilityTemplate:
                 diffs.append(diff)
                 symbols.append(s)
         return DerivativePair(functions=diffs, symbols=symbols)
-    
+
     def evaluate(self, function: Basic, parameter_values: dict[Symbol, float], site_fraction_generator: SiteFractionGenerator, conditions: dict[v.StateVariable, float]):
         '''
         Evaluates model template along single variable
@@ -420,7 +420,7 @@ class MobilityTemplate:
             return xs, ys, dependent_var[0]
         else:
             raise ValueError(f"Number of free conditions must be 1, but is {len(dependent_var)}")
-    
+
     def add_to_database(self, dbf: Database, parameter_values: dict[Union[Symbol, str], float], add_if_exists=True):
         '''
         Adds parameters to an existing database
@@ -452,7 +452,7 @@ class MobilityTemplate:
 def _plot_model(template: MobilityTemplate, function: Basic, parameter_values: dict[Symbol, float], site_fraction_generator: SiteFractionGenerator, conditions: dict[v.StateVariable, float], ax=None, scale=1, transform = None, *args, **kwargs):
     if ax is None:
         fig, ax = plt.subplots()
-    
+
     xs, ys, dep_var = template.evaluate(function, parameter_values, site_fraction_generator, conditions)
     if transform is not None:
         ys = transform(ys)

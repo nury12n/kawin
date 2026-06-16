@@ -5,7 +5,7 @@ from pycalphad.core.composition_set import CompositionSet
 
 from kawin.thermo.utils import _process_TG_arrays, _getPrecipitatePhase
 from kawin.thermo.Thermodynamics import GeneralThermodynamics
-from kawin.thermo.FreeEnergyHessian import dMudX
+from kawin.thermo.free_energy_hessian import dMudX
 
 class BinaryThermodynamics (GeneralThermodynamics):
     '''
@@ -142,7 +142,7 @@ class BinaryThermodynamics (GeneralThermodynamics):
         phases, sub_models = self._setupSubModels(precPhase)
         wks = Workspace(self.db, self.elements, phases, cond, models=sub_models,
                         phase_record_factory = self.phase_records, calc_opts={'pdens': self.pDens})
-        
+
         coord_keys = list(wks.eq.coords.keys())
         ge_var_idx = coord_keys.index('GE')
 

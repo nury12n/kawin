@@ -1,16 +1,16 @@
 import numpy as np
 
-def _process_x(x, numElements):
+def _process_x(x: float | list[float], num_elements: float):
     '''
     Processes x to always be an array for len(elements) - 1
     If x in len(elements), then we assume that the first item is the solute
     '''
     x = np.atleast_1d(x)
-    if len(x) == numElements:
+    if len(x) == num_elements:
         x = x[1:]
     return x
 
-def _process_xT_arrays(x, T, isBinary):
+def _process_arrays(x, T, isBinary):
     '''
     Converts x, T to np.array with proper dimensions
 
@@ -56,17 +56,3 @@ def _process_TG_arrays(T, gExtra):
             raise ValueError(f'Length of T ({len(T)}) and gExtra ({len(gExtra)}) arrays are incompatible. They must be either equal, or either T or gExtra should have length of 1.')
     return T, gExtra
 
-def _getMatrixPhase(phases, phase = None):
-    '''
-    kawin assumes that the first phase will be the matrix phase
-    Of course, this may not be true when we're working in models such as the 
-    homogenization model, so this assumption can be overridden using the 'phase' parameter
-    '''
-    return phases[0] if phase is None else phase
-    
-def _getPrecipitatePhase(phases, phase = None):
-    '''
-    For a two-phase system, kawin assumes the second phase is the precipitate phase
-    For multi-phase system, the 'phase' parameter is used to access different precipitate phases
-    '''
-    return phases[1] if phase is None else phase

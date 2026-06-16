@@ -13,14 +13,14 @@ def hessian(chemical_potentials, composition_set):
     d2L/dyidmu_A = -N dM_A/dy_i
     d2L/dmu_AdN = -M_A
 
-    Everything is per mole of formula unit, so N has to be corrected for phases where the 
+    Everything is per mole of formula unit, so N has to be corrected for phases where the
     total moles of atoms could be off from 1
 
     Parameters
     ----------
     chemical_potentials : 1-D ndarray
     composition_set : pycalphad.core.composition_set.CompositionSet
-    
+
     Returns
     -------
     Matrix of floats for each second derivative
@@ -42,7 +42,7 @@ def hessian(chemical_potentials, composition_set):
     #We assume 1 mole of phase, but this is per mole of atoms
     #This is generally okay, but for interstitials or vacancies in the main sublattice
     #We need to use moles of formula units when constructing the hessian
-    formulaPhAmt = 1 / np.sum(moleA)
+    formula_amt = 1 / np.sum(moleA)
 
     #dG/dy_i and d2G/dy2
     dg = np.zeros(len(composition_set.dof))
@@ -58,8 +58,8 @@ def hessian(chemical_potentials, composition_set):
                      phase_dof + num_internal_cons + len(elements) + 1))
     # wrt phase dof - d2L / dyi dyj
     hess[:phase_dof, :phase_dof] = d2g[composition_set.phase_record.num_statevars:,
-                                       composition_set.phase_record.num_statevars:] * formulaPhAmt
-    
+                                       composition_set.phase_record.num_statevars:] * formula_amt
+
     # wrt phase amount - d2L / dyi dN
     for i in range(phase_dof):
         hess[i, phase_dof] = dg[num_statevars + i] - np.sum(mu * dxdy[:, num_statevars+i])
@@ -73,8 +73,8 @@ def hessian(chemical_potentials, composition_set):
 
     # d2L / dyi dmuA
     index = phase_dof + num_internal_cons + 1
-    hess[:phase_dof, index:] = -1 * dxdy[:, num_statevars:].T * formulaPhAmt
-    hess[index:, :phase_dof] = -1 * dxdy[:, num_statevars:] * formulaPhAmt
+    hess[:phase_dof, index:] = -1 * dxdy[:, num_statevars:].T * formula_amt
+    hess[index:, :phase_dof] = -1 * dxdy[:, num_statevars:] * formula_amt
 
     # d2L / dmuA dN
     for A in range(len(elements)):
@@ -83,9 +83,9 @@ def hessian(chemical_potentials, composition_set):
     return hess
 
 
-def totalddx(chemical_potentials, composition_set, refElement):
+def total_ddx(chemical_potentials, composition_set, refElement):
     '''
-    Total derivative of site fractions, phase amount, lagrangian multipliers 
+    Total derivative of site fractions, phase amount, lagrangian multipliers
     and chemical potential with respect to system composition
     d/dx = partial d/dxA - partial d/dxR where R is reference
 
@@ -95,7 +95,7 @@ def totalddx(chemical_potentials, composition_set, refElement):
     composition_set : pycalphad.core.composition_set.CompositionSet
     refElement : str
         Reference element
-    
+
     Returns
     -------
     Array of floats for each derivative
@@ -123,16 +123,16 @@ def totalddx(chemical_potentials, composition_set, refElement):
         return np.zeros(b.shape)
 
 
-def partialddx(chemical_potentials, composition_set):
+def partial_ddx(chemical_potentials, composition_set):
     '''
-    Partial derivative of site fractions, phase amount, lagrangian multipliers 
+    Partial derivative of site fractions, phase amount, lagrangian multipliers
     and chemical potential with respect to system composition
 
     Parameters
     ----------
     chemical_potentials : 1-D ndarray
     composition_set : pycalphad.core.composition_set.CompositionSet
-    
+
     Returns
     -------
     Array of floats for each derivative
@@ -155,10 +155,10 @@ def partialddx(chemical_potentials, composition_set):
         return np.zeros(b.shape)
 
 
-def dMudX(chemical_potentials, composition_set, refElement):
+def total_dmudx(chemical_potentials, composition_set, refElement):
     '''
     Total derivative of chemical potential with respect to system composition
-    dmuA/dxB = (partial dmuA/dxB - partial dmuA/dxR) - (partial dmuR/dxB - partial dmuR/dxR) 
+    dmuA/dxB = (partial dmuA/dxB - partial dmuA/dxR) - (partial dmuR/dxB - partial dmuR/dxR)
     where R is reference
 
     This more or less represents the curvature of the free energy surface with reference element R
@@ -173,16 +173,16 @@ def dMudX(chemical_potentials, composition_set, refElement):
     composition_set : pycalphad.core.composition_set.CompositionSet
     refElement : str
         Reference element
-    
+
     Returns
     -------
     Array of floats for each derivative, (n-1 x n-1) matrix
     Derivatives will be in alphabetical order of elements
     '''
-    ddx = totalddx(chemical_potentials, composition_set, refElement)
+    ddx = total_ddx(chemical_potentials, composition_set, refElement)
     i0 = composition_set.phase_record.phase_dof + composition_set.phase_record.num_internal_cons + 1
     elements = list(composition_set.phase_record.nonvacant_elements)
-    
+
     dmudx = np.zeros((len(elements) - 1, len(elements) - 1))
 
     c = 0
@@ -196,7 +196,7 @@ def dMudX(chemical_potentials, composition_set, refElement):
 
     return dmudx
 
-def partialdMudX(chemical_potentials, composition_set):
+def partial_dmudx(chemical_potentials, composition_set):
     '''
     Partial derivative of chemical potential with respect to system composition
 
@@ -207,13 +207,13 @@ def partialdMudX(chemical_potentials, composition_set):
     Parameters
     ----------
     composition_set : pycalphad.core.composition_set.CompositionSet
-    
+
     Returns
     -------
     Array of floats for each derivative, (n x n) matrix
     Derivatives will be in alphabetical order of elements
     '''
-    ddx = partialddx(chemical_potentials, composition_set)
+    ddx = partial_ddx(chemical_potentials, composition_set)
     i0 = composition_set.phase_record.phase_dof + composition_set.phase_record.num_internal_cons + 1
-    
+
     return ddx[i0:,:]

@@ -19,8 +19,8 @@ from espei.typing import SymbolName
 from espei.utils import PickleableTinyDB, database_symbols_to_fit
 from espei.error_functions.residual_base import ResidualFunction, residual_function_registry
 
-from kawin.thermo.LocalEquilibrium import local_equilibrium
-from kawin.thermo.FreeEnergyHessian import partialdMudX
+from kawin.thermo.thermodynamics import local_equilibrium
+from kawin.thermo.free_energy_hessian import partial_dmudx
 from kawin.thermo.Mobility import interstitials
 
 #import kawin.mobility_fitting.error_functions.cached_mobility as cmob
@@ -101,11 +101,13 @@ class EquilibriumMobilityData:
 
             #Grab data from global cache
             result, cs = local_equilibrium(dbf, self.elements, self.phases, currConds, self.models, self.phase_records)
-            self.cache[tuple(inds)] = CachedCS(elements=list(cs[0].phase_record.nonvacant_elements),
-                                               temperature=cs[0].dof[cs[0].phase_record.state_variables.index(v.T)],
-                                               dof=np.array(cs[0].dof),
-                                               x=np.array(cs[0].X),
-                                               dmudx=partialdMudX(result.chemical_potentials, cs[0]))
+            self.cache[tuple(inds)] = CachedCS(
+                elements=list(cs[0].phase_record.nonvacant_elements),
+                temperature=cs[0].dof[cs[0].phase_record.state_variables.index(v.T)],
+                dof=np.array(cs[0].dof),
+                x=np.array(cs[0].X),
+                dmudx=partial_dmudx(result.chemical_potentials, cs[0])
+                )
 
 def get_mob_data(dbf: Database, comps: Sequence[str], phases: Sequence[str], datasets: PickleableTinyDB, parameters: Dict[str, float], data_weight_dict: Optional[Dict[str, float]] = None):
     '''

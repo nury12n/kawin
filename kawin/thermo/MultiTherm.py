@@ -6,7 +6,7 @@ from pycalphad import variables as v
 
 from kawin.thermo.utils import _getPrecipitatePhase, _process_xT_arrays, _process_x
 from kawin.thermo.Thermodynamics import GeneralThermodynamics
-from kawin.thermo.FreeEnergyHessian import dMudX
+from kawin.thermo.free_energy_hessian import dMudX
 from kawin.thermo.Mobility import inverseMobility, inverseMobility_from_diffusivity, tracer_diffusivity, tracer_diffusivity_from_diff
 
 # mc = 1 / (dx_bar^T * inv(M) * dx_bar)
@@ -49,10 +49,10 @@ def _growthRateOutputFromCurvature(x, dG, R, gExtra, curvature: CurvatureOutput)
     calpha = np.clip(calpha, 0, 1)
     cbeta = np.clip(cbeta, 0, 1)
 
-    return GrowthRateOutput(growth_rate=np.squeeze(gr), 
-                            c_alpha=np.squeeze(calpha), 
-                            c_beta=np.squeeze(cbeta), 
-                            c_eq_alpha=np.squeeze(curvature.c_eq_alpha), 
+    return GrowthRateOutput(growth_rate=np.squeeze(gr),
+                            c_alpha=np.squeeze(calpha),
+                            c_beta=np.squeeze(cbeta),
+                            c_eq_alpha=np.squeeze(curvature.c_eq_alpha),
                             c_eq_beta=np.squeeze(curvature.c_eq_beta))
 
 
@@ -122,7 +122,7 @@ class MulticomponentThermodynamics (GeneralThermodynamics):
         precPhase = _getPrecipitatePhase(self.phases, precPhase)
         if len(T) == 1:
             T = T*np.ones(gExtra.shape, dtype=np.float64)
-        
+
         caArray, cbArray = zip(*[self._interfacialComposition(x, T[i], gExtra[i], precPhase) for i in range(len(gExtra))])
         return np.squeeze(caArray), np.squeeze(cbArray)
 
@@ -153,7 +153,7 @@ class MulticomponentThermodynamics (GeneralThermodynamics):
         #Check for convergence, return None if not converged
         if np.any(np.isnan(mu)):
             return -1*np.ones(len(self.elements[:-1]), dtype=np.float64), -1*np.ones(len(self.elements[:-1]), dtype=np.float64)
-        
+
         cs_list = wks.get_composition_sets()
         ph = [cs.phase_record.phase_name for cs in cs_list]
 
@@ -170,7 +170,7 @@ class MulticomponentThermodynamics (GeneralThermodynamics):
             return xM[unsortIndices], xP[unsortIndices]
 
         return -1*np.ones(len(self.elements[:-1]), dtype=np.float64), -1*np.ones(len(self.elements[:-1]), dtype=np.float64)
-    
+
     def _curvatureFactorFromEq(self, chemical_potentials, cs_matrix, cs_precip, precPhase):
         '''
         Curvature factor (from Phillipes and Voorhees - 2013)
@@ -222,7 +222,7 @@ class MulticomponentThermodynamics (GeneralThermodynamics):
             Dnkj, dMudxParent, invMob = inverseMobility(chemical_potentials, cs_matrix, self.elements[0],
                                                         self.mobCallables[self.phases[0]],
                                                         mobility_correction=self.mobility_correction,
-                                                        vacancy_poor_interstitial_sublattice=self.vacancyPoorInterstitialSublattice.get(self.phases[0], False), 
+                                                        vacancy_poor_interstitial_sublattice=self.vacancyPoorInterstitialSublattice.get(self.phases[0], False),
                                                         parameters=self._parameters)
             Dtrace = tracer_diffusivity(cs_matrix, self.mobCallables[self.phases[0]], mobility_correction=self.mobility_correction, parameters=self._parameters)
 
@@ -263,11 +263,11 @@ class MulticomponentThermodynamics (GeneralThermodynamics):
         else:
             beta = 1 / bsum
 
-        self._curvature_outputs[precPhase] = CurvatureOutput(dc=num[unsortIndices]/den, 
-                                                             mc=1/den, 
-                                                             gba=Gba, 
-                                                             beta=beta, 
-                                                             c_eq_alpha=xM[unsortIndices], 
+        self._curvature_outputs[precPhase] = CurvatureOutput(dc=num[unsortIndices]/den,
+                                                             mc=1/den,
+                                                             gba=Gba,
+                                                             beta=beta,
+                                                             c_eq_alpha=xM[unsortIndices],
                                                              c_eq_beta=xP[unsortIndices])
 
         return self._curvature_outputs[precPhase]
@@ -313,20 +313,20 @@ class MulticomponentThermodynamics (GeneralThermodynamics):
             else:
                 print(f'Warning: {calc_source} equilibrum was not able to be solved for, using results of previous calculation')
                 return self._curvature_outputs[precPhase]
-            
+
         x, T = _process_xT_arrays(x, T, self.numElements == 2)
         if len(x) > 1 or len(T) > 1:
             raise ValueError('Curvature factor only takes in a single x,T condition.')
         x = np.squeeze(x)
         T = np.squeeze(T)
-            
+
         # Get composition sets for equilibrium between matrix and precipitate
         #precPhase = self.phases[1] if precPhase is None else precPhase
         precPhase = _getPrecipitatePhase(self.phases, precPhase)
         eq_results = self._getCompositionSetsEq(x, T, precPhase, self._compset_cache_curvature)
         if eq_results is None:
             return _process_invalid_eq('cached')
-        
+
         chemical_potentials, cs_matrix, cs_precip = eq_results
 
         # If either the matrix of precipitate is unstable, then search for two-phase equilibria
@@ -334,12 +334,12 @@ class MulticomponentThermodynamics (GeneralThermodynamics):
             eq_results = self._searchForTwoPhaseEq(x, T, precPhase, removeCache, searchDir, computeSearchDir)
             if eq_results is None:
                 return _process_invalid_eq('search')
-                
+
             chemical_potentials, cs_matrix, cs_precip = eq_results
 
         self._compset_cache_curvature[precPhase] = None if removeCache else [cs_matrix, cs_precip]
         return self._curvatureFactorFromEq(chemical_potentials, cs_matrix, cs_precip, precPhase)
-        
+
     def _searchForTwoPhaseEq(self, x, T, precPhase, removeCache = False, searchDir = None, computeSearchDir = False):
         '''
         Given x and a search direction (which should correspond to the composition of precipitate from driving force calc)
@@ -353,11 +353,11 @@ class MulticomponentThermodynamics (GeneralThermodynamics):
                 _, searchDir = self.getDrivingForce(x, T, precPhase, removeCache)
             if searchDir is None:
                 return None
-        
+
         searchDir = np.array(searchDir)
         currX = 0.5 * np.array(x) + 0.5 * searchDir
         currIt = 0
-        
+
         #MaxIt is 15, which refers to a maximum of 6e-5 difference in test composition between the 14th and 15th iteration
         #    Which is probably more than enough to find a two-phase region
         maxIt = 15
@@ -377,7 +377,7 @@ class MulticomponentThermodynamics (GeneralThermodynamics):
                 currX = 0.5*currX + 0.5*np.array(x)
             else:
                 return None
-            
+
             currIt += 1
 
         return None
@@ -419,8 +419,8 @@ class MulticomponentThermodynamics (GeneralThermodynamics):
         curv_results = self.curvatureFactor(x, T, precPhase, removeCache, searchDir)
         if curv_results is None:
             return None
-        
-        
+
+
         x = _process_x(x, self.numElements)
         return _growthRateOutputFromCurvature(x, dG, R, gExtra, curv_results)
 
