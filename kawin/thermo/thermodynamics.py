@@ -1,5 +1,7 @@
 import copy
+from typing import Protocol
 from collections import namedtuple
+from functools import wraps
 
 import numpy as np
 from tinydb import where
@@ -19,7 +21,7 @@ setattr(v, 'GE', v.IndependentPotential('GE'))
 
 SampledPointsCache = namedtuple('SampledPointsCache',
                                ['temperature', 'pressure', 'samples', 'ordered_samples'],
-                               defaults=(None, None, None))
+                               defaults=(None, None, None, None))
 
 def local_equilibrium(dbf, comps, phases, conds, models, phase_records, composition_sets=None, pdens=10):
     '''
@@ -306,12 +308,12 @@ class Thermodynamics:
 
         # Rename disordered phase contribution to new phase
         self.dbf.phases[new_phase].model_hints['disordered_phase'] = new_phase
-        ordered_phase = self.db.phases[new_phase].model_hints['ordered_phase']
+        ordered_phase = self.dbf.phases[new_phase].model_hints['ordered_phase']
         self.dbf.phases[ordered_phase].model_hints['disordered_phase'] = new_phase
 
         #Copy database parameters with new name
         param_query = where('phase_name') == phase
-        params = self.db.search(param_query)
+        params = self.dbf.search(param_query)
         for p in params:
             #We have to create a new dictionary since p is a TinyDB.Document
             new_p = {}
@@ -320,10 +322,10 @@ class Thermodynamics:
             new_p['phase_name'] = new_phase
             self.dbf._parameters.insert(new_p)
 
-def _get_phase(phases, phase = None):
+def _get_phase(phases: list[str], phase: str = None) -> str:
     return phases[0] if phase is None else phase
 
-def _process_conditions(conditions: dict[v.StateVariable, float | list[float]]):
+def _process_conditions(conditions: dict[v.StateVariable, float | list[float]]) -> tuple[dict[v.StateVariable, list[float]], int]:
     """
     Adjusts conditions to have all the same lengths
     Note: we do not support broadcasting
@@ -347,7 +349,12 @@ def _process_conditions(conditions: dict[v.StateVariable, float | list[float]]):
             conds[key] = conds[key][0]*np.ones(max_size)
     return conds, max_size
 
-def generate_model_subset(therm: Thermodynamics, phases: str | list[str] = None):
+def _full_comp_from_conditions(conditions: dict[v.StateVariable, float], elements: list[str]) -> np.array:
+    vals = np.array([conditions.get(v.X(e), 0) for e in sorted(elements)], dtype=np.float32)
+    vals[vals == 0] = np.sum(vals)
+    return vals
+
+def generate_model_subset(therm: Thermodynamics, phases: str | list[str] = None) -> tuple[list[str], dict[str, Model]]:
     """
     Creates a subset of phases and models and updates the phase records accordingly
 
@@ -364,6 +371,36 @@ def generate_model_subset(therm: Thermodynamics, phases: str | list[str] = None)
     # so we need to make sure that the phase record models align with the subset of phases
     therm.phase_record_factory.models = sub_models
     return phases, sub_models
+
+class ThermodynamicFunction(Protocol):
+    def __call__(self, therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], *args, **kwargs) -> any:
+        ...
+
+class DiffusitivtyFunction(Protocol):
+    def __call__(self, therm: Thermodynamics, ref_element: str, conditions: dict[v.StateVariable, float | list[float]], phase: str = None, cache: dict[str, any] = {}) -> np.array:
+        ...
+
+    @staticmethod
+    def squeeze(vals: list[np.array]) -> np.array:
+        return np.squeeze(vals)
+
+class DrivingForceFunction(Protocol):
+    def __call__(self, therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], matrix_phase: str, prec_phase: str, local_phase_sampling_conditions: dict[v.StateVariable, float] = None, cache: dict[str, any] = {}) -> tuple[np.array, np.array]:
+        ...
+
+    @staticmethod
+    def squeeze(vals: list[tuple[np.array, np.array]]) -> tuple[np.array, np.array]:
+        return np.squeeze([v[0] for v in vals]), np.squeeze([v[1] for v in vals])
+
+def enumerate_conditions(squeeze_func = lambda x: x):
+    def decorator(func: ThermodynamicFunction):
+        @wraps(func)
+        def wrapper(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], *args, **kwargs):
+            conds, num_conds = _process_conditions(conditions)
+            results = [func(therm, {key: value[i] for key, value in conds.items()}, *args, **kwargs) for i in range(num_conds)]
+            return squeeze_func(results)
+        return wrapper
+    return decorator
 
 def get_eq(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], phases: str | list[str] = None):
     """
@@ -453,7 +490,8 @@ def get_local_eq(therm: Thermodynamics, conditions: dict[v.StateVariable, float]
         composition_sets=composition_sets, pdens=therm.local_pdens
         )
 
-def compute_interdiffusivity(therm: Thermodynamics, ref_element: str, conditions: dict[v.StateVariable, float | list[float]], phase: str = None, cache: dict[str, list[CompositionSet]] = {}):
+@enumerate_conditions(DiffusitivtyFunction.squeeze)
+def compute_interdiffusivity(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], ref_element: str, phase: str = None, cache: dict[str, list[CompositionSet]] = None):
     """
     Gets interdiffusivity at unique composition and temperature
 
@@ -470,40 +508,33 @@ def compute_interdiffusivity(therm: Thermodynamics, ref_element: str, conditions
     -------
     Interdiffusivity as a matrix (will return float in binary case)
     """
-    conds, num_conds = _process_conditions(conditions)
     phase = _get_phase(therm.phases, phase)
-    composition_sets = None
-    if cache is not None:
-        composition_sets = cache.get(f'{phase}_diff', None)
-    Dnkjs = np.zeros((num_conds, therm.num_elements-1, therm.num_elements-1))
-    for i in range(num_conds):
-        single_conds = {key: value[i] for key, value in conds.items()}
-        result, composition_sets = get_local_eq(therm, single_conds, [phase], composition_sets=composition_sets)
-        cs_matrix = composition_sets[0]
-        chemical_potentials = result.chemical_potentials
+    if cache is None:
+        cache = {}
+    composition_sets = cache.get(f'{phase}_diff', None)
+    result, composition_sets = get_local_eq(therm, conditions, [phase], composition_sets=composition_sets)
+    cs_matrix = composition_sets[0]
+    chemical_potentials = result.chemical_potentials
 
-        # Get interdiffusivity from mobility or diffusivity models whichever is available
-        # If both mobility and diffusivity models exist, then favor the mobility model
-        if therm.mobility_callables[phase] is None:
-            Dnkj = mob_funcs.interdiffusivity_from_diff(
-                cs_matrix, ref_element, therm.diffusivity_callables[phase],
-                diffusivity_correction=therm.mobility_correction, parameters=therm._parameters
-                )
-        else:
-            Dnkj = mob_funcs.interdiffusivity(
-                chemical_potentials, cs_matrix, ref_element, therm.mobility_callables[phase],
-                mobility_correction=therm.mobility_correction,
-                vacancy_poor_interstitial_sublattice=therm.vacancy_poor_interstitial_sublattice.get(phase, False),
-                parameters=therm._parameters
-                )
+    # Get interdiffusivity from mobility or diffusivity models whichever is available
+    # If both mobility and diffusivity models exist, then favor the mobility model
+    if therm.mobility_callables.get(phase, None) is None:
+        Dnkj = mob_funcs.interdiffusivity_from_diff(
+            cs_matrix, ref_element, therm.diffusivity_callables[phase],
+            diffusivity_correction=therm.mobility_correction, parameters=therm._parameters
+            )
+    else:
+        Dnkj = mob_funcs.interdiffusivity(
+            chemical_potentials, cs_matrix, ref_element, therm.mobility_callables[phase],
+            mobility_correction=therm.mobility_correction,
+            vacancy_poor_interstitial_sublattice=therm.vacancy_poor_interstitial_sublattice.get(phase, False),
+            parameters=therm._parameters
+            )
 
-        if cache is not None:
-            cache[f'{phase}_diff'] = composition_sets
+    cache[f'{phase}_diff'] = composition_sets
+    return Dnkj
 
-        Dnkjs[i] = Dnkj
-
-    return np.squeeze(Dnkjs)
-
+@enumerate_conditions(DiffusitivtyFunction.squeeze)
 def compute_tracer_diffusivity(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], phase: str = None, cache: dict[str, list[CompositionSet]] = {}):
     """
     Gets tracer diffusivity at unique composition and temperature
@@ -521,39 +552,32 @@ def compute_tracer_diffusivity(therm: Thermodynamics, conditions: dict[v.StateVa
     -------
     Tracer diffusivity as a float
     """
-    conds, num_conds = _process_conditions(conditions)
     phase = _get_phase(therm.phases, phase)
-    composition_sets = None
-    if cache is not None:
-        composition_sets = cache.get(f'{phase}_diff', None)
-    diffs = np.zeros((num_conds, therm.num_elements))
-    for i in range(num_conds):
-        single_conds = {key: value[i] for key, value in conds.items()}
-        result, composition_sets = get_local_eq(therm, single_conds, [phase], composition_sets=composition_sets)
-        cs_matrix = composition_sets[0]
+    if cache is None:
+        cache = {}
 
-        # Get interdiffusivity from mobility or diffusivity models whichever is available
-        # If both mobility and diffusivity models exist, then favor the mobility model
-        if therm.mobility_callables[phase] is None:
-            #NOTE: This is not tested yet
-            dtrace = mob_funcs.tracer_diffusivity_from_diff(
-                cs_matrix, therm.diffusivity_callables[phase],
-                diffusivity_correction=therm.mobility_correction, parameters=therm._parameters
-                )
-        else:
-            dtrace = mob_funcs.tracer_diffusivity(
-                cs_matrix, therm.mobility_callables[phase],
-                mobility_correction=therm.mobility_correction, parameters=therm._parameters
-                )
+    composition_sets = cache.get(f'{phase}_diff', None)
+    result, composition_sets = get_local_eq(therm, conditions, [phase], composition_sets=composition_sets)
+    cs_matrix = composition_sets[0]
 
-        if cache is not None:
-            cache[f'{phase}_diff'] = composition_sets
+    # Get interdiffusivity from mobility or diffusivity models whichever is available
+    # If both mobility and diffusivity models exist, then favor the mobility model
+    if therm.mobility_callables.get(phase, None) is None:
+        #NOTE: This is not tested yet
+        dtrace = mob_funcs.tracer_diffusivity_from_diff(
+            cs_matrix, therm.diffusivity_callables[phase],
+            diffusivity_correction=therm.mobility_correction, parameters=therm._parameters
+            )
+    else:
+        dtrace = mob_funcs.tracer_diffusivity(
+            cs_matrix, therm.mobility_callables[phase],
+            mobility_correction=therm.mobility_correction, parameters=therm._parameters
+            )
 
-        diffs[i] = dtrace
+    cache[f'{phase}_diff'] = composition_sets
+    return dtrace
 
-    return np.squeeze(diffs)
-
-def _get_cs_eq(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], matrix_phase, prec_phase, cache = {}):
+def _get_cs_eq(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], matrix_phase, prec_phase, cache):
     """
     Gets composition set from x and T by global equilibrium
 
@@ -596,7 +620,7 @@ def _get_cs_eq(therm: Thermodynamics, conditions: dict[v.StateVariable, float | 
     # Updates a list of composition sets with new conditions
     # Return chemical potential, matrix comp set, precipitate comp set, and whether there is a miscibility gap
     def _update_composition_sets(composition_sets):
-        conditions = _process_conditions(conditions)
+        #conditions = _process_conditions(conditions)
         phases, sub_models = generate_model_subset(therm, [matrix_phase, prec_phase])
         result, composition_sets = local_equilibrium(
             therm.dbf, therm.elements, phases,
@@ -630,7 +654,7 @@ def _get_cs_eq(therm: Thermodynamics, conditions: dict[v.StateVariable, float | 
 
     return chemical_potentials, cs_matrix, cs_precip
 
-def _get_cs_for_df(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], matrix_phase, prec_phase, cache = {}):
+def _get_cs_for_df(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], matrix_phase, prec_phase, cache):
     """
     Wrapper for getting composition set from x and T by either global equilibrium or local from a cached composition set
 
@@ -665,7 +689,7 @@ def _get_cs_for_df(therm: Thermodynamics, conditions: dict[v.StateVariable, floa
         return chemical_potentials, cs_matrix, cs_precip
 
 
-def _sample_precipitate_cs(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], matrix_chem_pot, prec_phase, local_phase_sampling_conditions = None, cache = {}):
+def _sample_precipitate_cs(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], matrix_chem_pot, prec_phase, local_phase_sampling_conditions, cache):
     """
     Gets samples for precipitate phase for use in sampling driving force method and returns driving force and precipitate composition
 
@@ -696,7 +720,7 @@ def _sample_precipitate_cs(therm: Thermodynamics, conditions: dict[v.StateVariab
     precipitate composition set - corresponds to max driving force
     """
     orderTol = -1e-8
-    state_cond = {v.GE: therm.g_offset, v.N: 1, v.P: conditions.get(v.P, 101315), v.T: conditions[v.T]}
+    state_cond = {v.GE: therm.g_offset, v.N: 1, v.P: conditions[v.P], v.T: conditions[v.T]}
     str_cond = {str(key): val for key,val in state_cond.items()}
 
     #Sample precipitate phase and get driving force differences at all points -------------------------------------------------------------------
@@ -714,7 +738,7 @@ def _sample_precipitate_cs(therm: Thermodynamics, conditions: dict[v.StateVariab
                                 pdens=therm.sampling_pdens, model=sub_models, output='GM',
                                 phase_records=therm.phase_record_factory, conditions=local_phase_sampling_conditions,
                                 to_xarray=False, **str_cond)
-        if therm.is_ordered_phase[prec_phase]:
+        if therm.is_ordered_phase.get(prec_phase, False):
             ordered_points = calculate(therm.dbf, therm.elements, phases[0],
                                         pdens=therm.sampling_pdens, model=sub_models, output='OCM',
                                         phase_records=therm.phase_record_factory, to_xarray=False, **str_cond)
@@ -735,7 +759,7 @@ def _sample_precipitate_cs(therm: Thermodynamics, conditions: dict[v.StateVariab
 
     #Find maximum driving force and corresponding composition -----------------------------------------------------------------------------------
     #For phases with order/disorder transition, a filter is applied such that it will only use points that are below the disordered energy surface
-    if therm.is_ordered_phase[prec_phase]:
+    if therm.is_ordered_phase.get(prec_phase, False):
         indices = np.squeeze(ordered_points.OCM) < orderTol
         diff = diff[indices]
         y = y[indices]
@@ -750,8 +774,8 @@ def _sample_precipitate_cs(therm: Thermodynamics, conditions: dict[v.StateVariab
 
     return dg, prec_cs
 
-
-def compute_driving_force_sampling(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], matrix_phase, prec_phase, local_phase_sampling_conditions = None, cache = {}):
+@enumerate_conditions(DrivingForceFunction.squeeze)
+def compute_driving_force_sampling(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], matrix_phase, prec_phase, local_phase_sampling_conditions = None, cache = None):
     """
     Gets driving force for nucleation by sampling
 
@@ -783,30 +807,24 @@ def compute_driving_force_sampling(therm: Thermodynamics, conditions: dict[v.Sta
     Driving force is positive if precipitate can form
     Precipitate composition will be None if driving force is negative
     """
+    if cache is None:
+        cache = {}
     # Calculate equilibrium with only the parent phase
-    # Return (None, None) if equilibrium was not successful
     matrix_cs = cache.get(f'{matrix_phase}_dg', None)
     result, matrix_cs = get_local_eq(therm, conditions, [matrix_phase], composition_sets=matrix_cs)
-    #result, self._matrix_cs = self.getLocalEq(x, T, 0, [self.phases[0]], composition_sets=self._matrix_cs)
     if any(np.isnan(result.chemical_potentials)):
         return None, None
 
     # Get precipitate composition set that maximizes driving force
-    #dg, prec_cs = self._getPrecCompositionSetSamplingDF(x, T, result.chemical_potentials, precPhase, local_phase_sampling_conditions)
     dg, prec_cs = _sample_precipitate_cs(therm, conditions, result.chemical_potentials, prec_phase, local_phase_sampling_conditions, cache)
 
-    # Sort precipitate composition from alphabetical to input order of elements
-    #sortIndices = np.argsort(self.elements[:-1])
-    #unsortIndices = np.argsort(sortIndices)
     beta_x = np.array(prec_cs.X, dtype=np.float64)
-    #beta_x = beta_x[unsortIndices]
-    beta_x = beta_x[therm.sort_indices[1:]]
-
     cache[f'{matrix_phase}_dg'] = matrix_cs
-    return np.squeeze(dg), np.squeeze(beta_x)
+    # we add therm.g_offset to get consistent results with the other driving force functions
+    return np.squeeze(dg + therm.g_offset), np.squeeze(beta_x)
 
-
-def compute_driving_force_approximate(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], matrix_phase, prec_phase, local_phase_sampling_conditions = None, cache = {}):
+@enumerate_conditions(DrivingForceFunction.squeeze)
+def compute_driving_force_approximate(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], matrix_phase, prec_phase, local_phase_sampling_conditions = None, cache = None):
     """
     Approximate method of driving force calculation
     Assumes equilibrium composition of precipitate phase
@@ -841,34 +859,27 @@ def compute_driving_force_approximate(therm: Thermodynamics, conditions: dict[v.
     Driving force is positive if precipitate can form
     Precipitate composition will be None if driving force is negative
     """
+    if cache is None:
+        cache = {}
     matrix_cs = cache.get(f'{matrix_phase}_dg', None)
-    cs_results = _get_cs_for_df(therm, conditions, matrix_phase, prec_phase)
+    cs_results = _get_cs_for_df(therm, conditions, matrix_phase, prec_phase, cache)
     if cs_results is None:
         return compute_driving_force_sampling(therm, conditions, matrix_phase, prec_phase, local_phase_sampling_conditions, cache)
-    #cs_results = self._getCompositionSetsForDF(x, T, precPhase)
-    #if cs_results is None:
-    #    return self._getDrivingForceSampling(x, T, precPhase, removeCache=removeCache, local_phase_sampling_conditions=local_phase_sampling_conditions)
     chemical_potentials, cs_matrix, cs_precip = cs_results
 
     # Calculate equilibrium with only the parent phase
-    # Return (None, None) if equilibrium was not successful
     result, matrix_cs = get_local_eq(therm, conditions, [matrix_phase], composition_sets=matrix_cs)
-    #result, self._matrix_cs = self.getLocalEq(x, T, 0, [self.phases[0]], composition_sets=self._matrix_cs)
     if any(np.isnan(result.chemical_potentials)):
         return None, None
 
-    xP = np.array(cs_precip.X, dtype=np.float64)
-    dg = np.sum(xP * result.chemical_potentials) - np.sum(xP * chemical_potentials)
+    xp = np.array(cs_precip.X, dtype=np.float64)
+    dg = np.sum(xp * result.chemical_potentials) - np.sum(xp * chemical_potentials)
 
-    #sortIndices = np.argsort(self.elements[:-1])
-    #unsortIndices = np.argsort(sortIndices)
-
-    #self._resetDrivingForceCache(precPhase, removeCache)
-    #return np.squeeze(dg), np.squeeze(xP[unsortIndices[1:]])
     cache[f'{matrix_phase}_dg'] = matrix_cs
-    return np.squeeze(dg), np.squeeze(xP[therm.sort_indices][1:])
+    return np.squeeze(dg), np.squeeze(xp)
 
-def compute_driving_force_curvature(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], matrix_phase, prec_phase, local_phase_sampling_conditions = None, cache = {}):
+@enumerate_conditions(DrivingForceFunction.squeeze)
+def compute_driving_force_curvature(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], matrix_phase, prec_phase, local_phase_sampling_conditions = None, cache = None):
     """
     Gets driving force from curvature of free energy function
     Assumes small saturation
@@ -903,40 +914,36 @@ def compute_driving_force_curvature(therm: Thermodynamics, conditions: dict[v.St
     Driving force is positive if precipitate can form
     Precipitate composition will be None if driving force is negative
     """
+    if cache is None:
+        cache = {}
     matrix_cs = cache.get(f'{matrix_phase}_dg', None)
-    cs_results = _get_cs_for_df(therm, conditions, matrix_phase, prec_phase)
+    cs_results = _get_cs_for_df(therm, conditions, matrix_phase, prec_phase, cache)
+    # cs_results will be None if convergence error or two-phase region, fallback to sampling method
     if cs_results is None:
         return compute_driving_force_sampling(therm, conditions, matrix_phase, prec_phase, local_phase_sampling_conditions, cache)
-    #cs_results = self._getCompositionSetsForDF(x, T, precPhase)
-    #if cs_results is None:
-    #    return self._getDrivingForceSampling(x, T, precPhase, removeCache=removeCache, local_phase_sampling_conditions=local_phase_sampling_conditions)
 
     chemical_potentials, cs_matrix, cs_precip = cs_results
-    non_va_elements = list(cs_matrix.phase_record.nonvacant_elements)
-    ref_index = non_va_elements.index(therm.elements[0])
+
+    x_full = _full_comp_from_conditions(conditions, therm.nonvacant_elements)
     x_matrix = np.array(cs_matrix.X, dtype=np.float64)
     x_precip = np.array(cs_precip.X, dtype=np.float64)
+    ref_index = np.argmax(x_full)
 
-    #If in two phase region, then get curvature of parent phase and use it to calculate driving force
-    #sortIndices = np.argsort(self.elements[1:-1])
-    #unsortIndices = np.argsort(sortIndices)
+    # If in two phase region, then get curvature of parent phase and use it to calculate driving force
+    dmudx_parent = mob_funcs.total_dmudx(chemical_potentials, cs_matrix, cs_matrix.phase_record.nonvacant_elements[ref_index])
+    xf = np.delete(x_full, ref_index)
+    xm = np.delete(x_matrix, ref_index)
+    xp = np.delete(x_precip, ref_index)
+    xbar = np.array([xp - xm])
 
-    dmudx_parent = mob_funcs.total_dmudx(chemical_potentials, cs_matrix, therm.elements[0])
-    xM = np.delete(x_matrix, ref_index)
-    xP = np.delete(x_precip, ref_index)
-    xBar = np.array([xP - xM])
+    xd = np.array([xf - xm])
+    dg = np.matmul(xd, np.matmul(dmudx_parent, xbar.T))
 
-    #x = x[sortIndices]
-    x = x[therm.sort_indices[1:]]
-    xD = np.array([x - xM])
+    cache[f'{matrix_phase}_dg'] = matrix_cs
+    return np.squeeze(dg), np.squeeze(x_precip)
 
-    dg = np.matmul(xD, np.matmul(dmudx_parent, xBar.T))
-
-    #self._resetDrivingForceCache(precPhase, removeCache)
-    return np.squeeze(dg), np.squeeze(xP[therm.sort_indices[1:]])
-
-
-def compute_driving_force_tangent(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], matrix_phase, prec_phase, local_phase_sampling_conditions = None, cache = {}):
+@enumerate_conditions(DrivingForceFunction.squeeze)
+def compute_driving_force_tangent(therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]], matrix_phase, prec_phase, local_phase_sampling_conditions = None, cache = None):
     """
     Gets driving force from parallel tangent calculation
 
@@ -970,30 +977,24 @@ def compute_driving_force_tangent(therm: Thermodynamics, conditions: dict[v.Stat
     Driving force is positive if precipitate can form
     Precipitate composition will be None if driving force is negative
     """
+    if cache is None:
+        cache = {}
     # Calculate equilibrium with only the parent phase
-    # Return (None, None) if equilibrium was not successful
     matrix_cs = cache.get(f'{matrix_phase}_dg', None)
     result, matrix_cs = get_local_eq(therm, conditions, [matrix_phase], composition_sets=matrix_cs)
-    #result, self._matrix_cs = self.getLocalEq(x, T, 0, [self.phases[0]], composition_sets=self._matrix_cs)
     if any(np.isnan(result.chemical_potentials)):
         return None, None
 
     # Setup conditions, which include T, P, N and MU (for all elements)
     # The nonvacant elements list in the matrix phase record will be sorted
-    cond = {v.T: conditions[v.T], v.P: conditions.get(v.P, 101325), v.N: conditions.get(v.N, 1)}
+    mu_conds = {v.T: conditions[v.T], v.P: conditions.get(v.P, 101325), v.N: conditions.get(v.N, 1)}
     non_va_elements = matrix_cs[0].phase_record.nonvacant_elements
-    cond.update({v.MU(e): result.chemical_potentials[i] for i,e in enumerate(non_va_elements)})
-    #cond = {v.T: T, v.P: 101325, v.N: 1}
-    #non_va_elements = self._matrix_cs[0].phase_record.nonvacant_elements
-    #cond.update({v.MU(e): result.chemical_potentials[i] for i,e in enumerate(non_va_elements)})
+    mu_conds.update({v.MU(e): result.chemical_potentials[i] for i,e in enumerate(non_va_elements)})
 
     # If we do not have a precipitate composition set, then find one by sampling
     if cache.get(f'{prec_phase}_dg', None) is None:
-        dg, prec_cs = _sample_precipitate_cs(therm, conditions, result.chemical_potentials, prec_phase, local_phase_sampling_conditions)
+        dg, prec_cs = _sample_precipitate_cs(therm, conditions, result.chemical_potentials, prec_phase, local_phase_sampling_conditions, cache)
         cache[f'{prec_phase}_dg'] = [prec_cs]
-    #if self._compset_cache_df.get(precPhase, None) is None:
-    #    dg, prec_cs = self._getPrecCompositionSetSamplingDF(x, T, result.chemical_potentials, precPhase, local_phase_sampling_conditions)
-    #    self._compset_cache_df[precPhase] = [prec_cs]
 
     #Solving for local equilibrium on precipitate
     #The fixed conditions are T, P and MU, so this should solve for precipitate composition and GE
@@ -1002,17 +1003,13 @@ def compute_driving_force_tangent(therm: Thermodynamics, conditions: dict[v.Stat
     phases, sub_models = generate_model_subset(therm, [prec_phase])
     prec_eq_results, prec_cs = local_equilibrium(
         therm.dbf, therm.elements, phases,
-        cond, sub_models, therm.phase_record_factory,
+        mu_conds, sub_models, therm.phase_record_factory,
         composition_sets=cache[f'{prec_phase}_dg'], pdens=therm.local_pdens
         )
-    #phases, sub_models = self._setupSubModels([precPhase])
-    #prec_eq_results, prec_cs = local_equilibrium(self.db, self.elements, phases, cond,
-    #                                                sub_models, self.phase_records,
-    #                                                composition_sets=self._compset_cache_df[precPhase], pDens=self.local_pDens)
     if any(np.isnan(prec_eq_results.chemical_potentials)):
         return None, None
 
-    # NOTE: we assum that v.GE is the first state variable in alphabetical order
+    # NOTE: we assume that v.GE is the first state variable in alphabetical order
     dg = prec_eq_results.x[0]
     xb = np.array(prec_cs[0].X)
 
@@ -1024,311 +1021,299 @@ def compute_driving_force_tangent(therm: Thermodynamics, conditions: dict[v.Stat
     if np.allclose(xb, mat_comps, 1e-6):
         cache[f'{prec_phase}_dg'] = None
         return compute_driving_force_sampling(therm, conditions, matrix_phase, prec_phase, local_phase_sampling_conditions, cache)
-    #mat_comps = np.array(self._matrix_cs[0].X, dtype=np.float64)
-    #if np.allclose(xb, mat_comps, 1e-6):
-    #    self._compset_cache_df[precPhase] = None
-    #    return self._getDrivingForceSampling(x, T, precPhase, removeCache=removeCache, local_phase_sampling_conditions=local_phase_sampling_conditions)
 
     # If all goes well, then we can store the cache
     cache[f'{prec_phase}_dg'] = prec_cs
     cache[f'{matrix_phase}_dg'] = matrix_cs
-    #self._compset_cache_df[precPhase] = prec_cs
+    return np.squeeze(dg), np.squeeze(xb)
 
-    #sortIndices = np.argsort(self.elements[:-1])
-    #unsortIndices = np.argsort(sortIndices)
+# def getDrivingForce(self, x, T, precPhase = None, removeCache = False, local_phase_sampling_conditions = None):
+#     """
+#     Gets driving force using method defined upon initialization
 
-    #self._resetDrivingForceCache(precPhase, removeCache)
+#     Parameters
+#     ----------
+#     x : float, array or 2D array
+#         Composition of minor element in bulk matrix phase
+#         For binary system, use an array for multiple compositions
+#         For multicomponent systems, use a 2D array for multiple compositions
+#             Where 0th axis is for indices of each composition
+#     T : float or array
+#         Temperature in K
+#         Must be same length as x if x is array or 2D array
+#     precPhase : str (optional)
+#         Precipitate phase to consider (default is first precipitate phase in list)
+#     removeCache : bool (optional)
+#         If True, this will not cache any equilibrium
+#         This is used for training since training points may not be near each other
 
-    #return np.squeeze(dg), np.squeeze(xb[unsortIndices[1:]])
-    return np.squeeze(dg), np.squeeze(xb[therm.sort_indices[1:]])
+#     Returns
+#     -------
+#     (driving force, precipitate composition)
+#     Driving force is positive if precipitate can form
+#     Precipitate composition will be None if driving force is negative
+#     """
+#     x, T = _process_xT_arrays(x, T, self.numElements == 2)
+#     precPhase = _getPrecipitatePhase(self.phases, precPhase)
+#     dgArray, compArray = zip(*[self._drivingForce(xi, Ti, precPhase, removeCache, local_phase_sampling_conditions) for xi, Ti in zip(x, T)])
+#     return np.squeeze(dgArray), np.squeeze(compArray)
 
-def getDrivingForce(self, x, T, precPhase = None, removeCache = False, local_phase_sampling_conditions = None):
-    """
-    Gets driving force using method defined upon initialization
+# def _resetDrivingForceCache(self, phase, removeCache):
+#     if removeCache:
+#         self._compset_cache_df[phase] = None
+#         self._matrix_cs = None
+#         self._points_cache[phase] = SampledPointsCache()
 
-    Parameters
-    ----------
-    x : float, array or 2D array
-        Composition of minor element in bulk matrix phase
-        For binary system, use an array for multiple compositions
-        For multicomponent systems, use a 2D array for multiple compositions
-            Where 0th axis is for indices of each composition
-    T : float or array
-        Temperature in K
-        Must be same length as x if x is array or 2D array
-    precPhase : str (optional)
-        Precipitate phase to consider (default is first precipitate phase in list)
-    removeCache : bool (optional)
-        If True, this will not cache any equilibrium
-        This is used for training since training points may not be near each other
+# def _getDrivingForceSampling(self, x, T, precPhase, removeCache = False, local_phase_sampling_conditions = None):
+#     """
+#     Gets driving force for nucleation by sampling
 
-    Returns
-    -------
-    (driving force, precipitate composition)
-    Driving force is positive if precipitate can form
-    Precipitate composition will be None if driving force is negative
-    """
-    x, T = _process_xT_arrays(x, T, self.numElements == 2)
-    precPhase = _getPrecipitatePhase(self.phases, precPhase)
-    dgArray, compArray = zip(*[self._drivingForce(xi, Ti, precPhase, removeCache, local_phase_sampling_conditions) for xi, Ti in zip(x, T)])
-    return np.squeeze(dgArray), np.squeeze(compArray)
+#     Steps
+#         1. Compute local equilibrium at x and T of only the matrix phase
+#         2. Sample precipitate phase
+#             If ordered contribution to matrix phase, then sample ordering contribution
+#             and remove points on the matrix free energy surface
+#         3. Compute energy difference between precipitate samples and chemical potential hyperplane
+#         4. Find sample that maximizes energy difference and return sample composition and driving force
 
-def _resetDrivingForceCache(self, phase, removeCache):
-    if removeCache:
-        self._compset_cache_df[phase] = None
-        self._matrix_cs = None
-        self._points_cache[phase] = SampledPointsCache()
+#     Parameters
+#     ----------
+#     x : float or array
+#         Composition of minor element in bulk matrix phase
+#         Use float for binary systems
+#         Use array for multicomponent systems
+#     T : float
+#         Temperature in K
+#     precPhase : str (optional)
+#         Precipitate phase to consider (default is first precipitate phase in list)
+#     removeCache : bool (optional)
+#         If True, this will not cache any equilibrium
+#         This is used for training since training points may not be near each other
 
-def _getDrivingForceSampling(self, x, T, precPhase, removeCache = False, local_phase_sampling_conditions = None):
-    """
-    Gets driving force for nucleation by sampling
+#     Returns
+#     -------
+#     (driving force, precipitate composition)
+#     Driving force is positive if precipitate can form
+#     Precipitate composition will be None if driving force is negative
+#     """
+#     # Calculate equilibrium with only the parent phase
+#     # Return (None, None) if equilibrium was not successful
+#     result, self._matrix_cs = self.getLocalEq(x, T, 0, [self.phases[0]], composition_sets=self._matrix_cs)
+#     if any(np.isnan(result.chemical_potentials)):
+#         return None, None
 
-    Steps
-        1. Compute local equilibrium at x and T of only the matrix phase
-        2. Sample precipitate phase
-            If ordered contribution to matrix phase, then sample ordering contribution
-            and remove points on the matrix free energy surface
-        3. Compute energy difference between precipitate samples and chemical potential hyperplane
-        4. Find sample that maximizes energy difference and return sample composition and driving force
+#     # Get precipitate composition set that maximizes driving force
+#     dg, prec_cs = self._getPrecCompositionSetSamplingDF(x, T, result.chemical_potentials, precPhase, local_phase_sampling_conditions)
 
-    Parameters
-    ----------
-    x : float or array
-        Composition of minor element in bulk matrix phase
-        Use float for binary systems
-        Use array for multicomponent systems
-    T : float
-        Temperature in K
-    precPhase : str (optional)
-        Precipitate phase to consider (default is first precipitate phase in list)
-    removeCache : bool (optional)
-        If True, this will not cache any equilibrium
-        This is used for training since training points may not be near each other
+#     # Sort precipitate composition from alphabetical to input order of elements
+#     sortIndices = np.argsort(self.elements[:-1])
+#     unsortIndices = np.argsort(sortIndices)
+#     beta_x = np.array(prec_cs.X, dtype=np.float64)
+#     beta_x = beta_x[unsortIndices]
 
-    Returns
-    -------
-    (driving force, precipitate composition)
-    Driving force is positive if precipitate can form
-    Precipitate composition will be None if driving force is negative
-    """
-    # Calculate equilibrium with only the parent phase
-    # Return (None, None) if equilibrium was not successful
-    result, self._matrix_cs = self.getLocalEq(x, T, 0, [self.phases[0]], composition_sets=self._matrix_cs)
-    if any(np.isnan(result.chemical_potentials)):
-        return None, None
+#     self._resetDrivingForceCache(precPhase, removeCache)
+#     return np.squeeze(dg), np.squeeze(beta_x[1:])
 
-    # Get precipitate composition set that maximizes driving force
-    dg, prec_cs = self._getPrecCompositionSetSamplingDF(x, T, result.chemical_potentials, precPhase, local_phase_sampling_conditions)
+# def _getDrivingForceApprox(self, x, T, precPhase, removeCache = False, local_phase_sampling_conditions = None):
+#     """
+#     Approximate method of driving force calculation
+#     Assumes equilibrium composition of precipitate phase
 
-    # Sort precipitate composition from alphabetical to input order of elements
-    sortIndices = np.argsort(self.elements[:-1])
-    unsortIndices = np.argsort(sortIndices)
-    beta_x = np.array(prec_cs.X, dtype=np.float64)
-    beta_x = beta_x[unsortIndices]
+#     Sampling method is used if driving force is negative
 
-    self._resetDrivingForceCache(precPhase, removeCache)
-    return np.squeeze(dg), np.squeeze(beta_x[1:])
+#     Steps:
+#         1. Compute equilibrium and get composition sets for matrix and precipitate phase
+#         2. Check for 2 phases and that one phase is the matrix and other phase is precipitate
+#             If not, then resort to sampling method
+#         3. Compute equilibrium at matrix composition and get chemical potential hyperplane
+#         4. Driving force is the difference between the free energy of the precipitate (from step 1)
+#             and the free energy on the chemical potential hyperplane (from step 3) at the precipitate composition
 
-def _getDrivingForceApprox(self, x, T, precPhase, removeCache = False, local_phase_sampling_conditions = None):
-    """
-    Approximate method of driving force calculation
-    Assumes equilibrium composition of precipitate phase
+#     Parameters
+#     ----------
+#     x : float or array
+#         Composition of minor element in bulk matrix phase
+#         Use float for binary systems
+#         Use array for multicomponent systems
+#     T : float
+#         Temperature in K
+#     precPhase : str (optional)
+#         Precipitate phase to consider (default is first precipitate phase in list)
+#     removeCache : bool (optional)
+#         If True, this will not cache any equilibrium
+#         This is used for training since training points may not be near each other
 
-    Sampling method is used if driving force is negative
+#     Returns
+#     -------
+#     (driving force, precipitate composition)
+#     Driving force is positive if precipitate can form
+#     Precipitate composition will be None if driving force is negative
+#     """
+#     cs_results = self._getCompositionSetsForDF(x, T, precPhase)
+#     if cs_results is None:
+#         return self._getDrivingForceSampling(x, T, precPhase, removeCache=removeCache, local_phase_sampling_conditions=local_phase_sampling_conditions)
+#     chemical_potentials, cs_matrix, cs_precip = cs_results
 
-    Steps:
-        1. Compute equilibrium and get composition sets for matrix and precipitate phase
-        2. Check for 2 phases and that one phase is the matrix and other phase is precipitate
-            If not, then resort to sampling method
-        3. Compute equilibrium at matrix composition and get chemical potential hyperplane
-        4. Driving force is the difference between the free energy of the precipitate (from step 1)
-            and the free energy on the chemical potential hyperplane (from step 3) at the precipitate composition
+#     # Calculate equilibrium with only the parent phase
+#     # Return (None, None) if equilibrium was not successful
+#     result, self._matrix_cs = self.getLocalEq(x, T, 0, [self.phases[0]], composition_sets=self._matrix_cs)
+#     if any(np.isnan(result.chemical_potentials)):
+#         return None, None
 
-    Parameters
-    ----------
-    x : float or array
-        Composition of minor element in bulk matrix phase
-        Use float for binary systems
-        Use array for multicomponent systems
-    T : float
-        Temperature in K
-    precPhase : str (optional)
-        Precipitate phase to consider (default is first precipitate phase in list)
-    removeCache : bool (optional)
-        If True, this will not cache any equilibrium
-        This is used for training since training points may not be near each other
+#     xP = np.array(cs_precip.X, dtype=np.float64)
+#     dg = np.sum(xP * result.chemical_potentials) - np.sum(xP * chemical_potentials)
 
-    Returns
-    -------
-    (driving force, precipitate composition)
-    Driving force is positive if precipitate can form
-    Precipitate composition will be None if driving force is negative
-    """
-    cs_results = self._getCompositionSetsForDF(x, T, precPhase)
-    if cs_results is None:
-        return self._getDrivingForceSampling(x, T, precPhase, removeCache=removeCache, local_phase_sampling_conditions=local_phase_sampling_conditions)
-    chemical_potentials, cs_matrix, cs_precip = cs_results
+#     sortIndices = np.argsort(self.elements[:-1])
+#     unsortIndices = np.argsort(sortIndices)
 
-    # Calculate equilibrium with only the parent phase
-    # Return (None, None) if equilibrium was not successful
-    result, self._matrix_cs = self.getLocalEq(x, T, 0, [self.phases[0]], composition_sets=self._matrix_cs)
-    if any(np.isnan(result.chemical_potentials)):
-        return None, None
+#     self._resetDrivingForceCache(precPhase, removeCache)
+#     return np.squeeze(dg), np.squeeze(xP[unsortIndices[1:]])
 
-    xP = np.array(cs_precip.X, dtype=np.float64)
-    dg = np.sum(xP * result.chemical_potentials) - np.sum(xP * chemical_potentials)
+# def _getDrivingForceCurvature(self, x, T, precPhase, removeCache = False, local_phase_sampling_conditions = None):
+#     """
+#     Gets driving force from curvature of free energy function
+#     Assumes small saturation
 
-    sortIndices = np.argsort(self.elements[:-1])
-    unsortIndices = np.argsort(sortIndices)
+#     Steps:
+#         1. Compute equilibrium and get composition sets for matrix and precipitate phase
+#         2. Check for 2 phases and that one phase is the matrix and other phase is precipitate
+#             If not, then resort to sampling method
+#         3. Get dmu/dx (free energy curvature)
+#         4. Compute (x_infty - x_matrix) * dmu/dx * (x_prec - x_matrix)^T
+#             This does a first (or second?) order approximation of the driving force based off the curvature at x_infty
 
-    self._resetDrivingForceCache(precPhase, removeCache)
-    return np.squeeze(dg), np.squeeze(xP[unsortIndices[1:]])
+#     Sampling method is used if driving force is negative
 
-def _getDrivingForceCurvature(self, x, T, precPhase, removeCache = False, local_phase_sampling_conditions = None):
-    """
-    Gets driving force from curvature of free energy function
-    Assumes small saturation
+#     Parameters
+#     ----------
+#     x : float or array
+#         Composition of minor element in bulk matrix phase
+#         Use float for binary systems
+#         Use array for multicomponent systems
+#     T : float
+#         Temperature in K
+#     precPhase : str (optional)
+#         Precipitate phase to consider (default is first precipitate phase in list)
+#     removeCache : bool (optional)
+#         If True, this will not cache any equilibrium
+#         This is used for training since training points may not be near each other
 
-    Steps:
-        1. Compute equilibrium and get composition sets for matrix and precipitate phase
-        2. Check for 2 phases and that one phase is the matrix and other phase is precipitate
-            If not, then resort to sampling method
-        3. Get dmu/dx (free energy curvature)
-        4. Compute (x_infty - x_matrix) * dmu/dx * (x_prec - x_matrix)^T
-            This does a first (or second?) order approximation of the driving force based off the curvature at x_infty
+#     Returns
+#     -------
+#     (driving force, precipitate composition)
+#     Driving force is positive if precipitate can form
+#     Precipitate composition will be None if driving force is negative
+#     """
+#     cs_results = self._getCompositionSetsForDF(x, T, precPhase)
+#     if cs_results is None:
+#         return self._getDrivingForceSampling(x, T, precPhase, removeCache=removeCache, local_phase_sampling_conditions=local_phase_sampling_conditions)
 
-    Sampling method is used if driving force is negative
+#     chemical_potentials, cs_matrix, cs_precip = cs_results
+#     non_va_elements = list(cs_matrix.phase_record.nonvacant_elements)
+#     refIndex = non_va_elements.index(self.elements[0])
+#     x_matrix = np.array(cs_matrix.X, dtype=np.float64)
+#     x_precip = np.array(cs_precip.X, dtype=np.float64)
 
-    Parameters
-    ----------
-    x : float or array
-        Composition of minor element in bulk matrix phase
-        Use float for binary systems
-        Use array for multicomponent systems
-    T : float
-        Temperature in K
-    precPhase : str (optional)
-        Precipitate phase to consider (default is first precipitate phase in list)
-    removeCache : bool (optional)
-        If True, this will not cache any equilibrium
-        This is used for training since training points may not be near each other
+#     #If in two phase region, then get curvature of parent phase and use it to calculate driving force
+#     sortIndices = np.argsort(self.elements[1:-1])
+#     unsortIndices = np.argsort(sortIndices)
 
-    Returns
-    -------
-    (driving force, precipitate composition)
-    Driving force is positive if precipitate can form
-    Precipitate composition will be None if driving force is negative
-    """
-    cs_results = self._getCompositionSetsForDF(x, T, precPhase)
-    if cs_results is None:
-        return self._getDrivingForceSampling(x, T, precPhase, removeCache=removeCache, local_phase_sampling_conditions=local_phase_sampling_conditions)
+#     dMudxParent = dMudX(chemical_potentials, cs_matrix, self.elements[0])
+#     xM = np.delete(x_matrix, refIndex)
+#     xP = np.delete(x_precip, refIndex)
+#     xBar = np.array([xP - xM])
 
-    chemical_potentials, cs_matrix, cs_precip = cs_results
-    non_va_elements = list(cs_matrix.phase_record.nonvacant_elements)
-    refIndex = non_va_elements.index(self.elements[0])
-    x_matrix = np.array(cs_matrix.X, dtype=np.float64)
-    x_precip = np.array(cs_precip.X, dtype=np.float64)
+#     x = x[sortIndices]
+#     xD = np.array([x - xM])
 
-    #If in two phase region, then get curvature of parent phase and use it to calculate driving force
-    sortIndices = np.argsort(self.elements[1:-1])
-    unsortIndices = np.argsort(sortIndices)
+#     dg = np.matmul(xD, np.matmul(dMudxParent, xBar.T))
 
-    dMudxParent = dMudX(chemical_potentials, cs_matrix, self.elements[0])
-    xM = np.delete(x_matrix, refIndex)
-    xP = np.delete(x_precip, refIndex)
-    xBar = np.array([xP - xM])
+#     self._resetDrivingForceCache(precPhase, removeCache)
+#     return np.squeeze(dg), np.squeeze(xP[unsortIndices])
 
-    x = x[sortIndices]
-    xD = np.array([x - xM])
+# def _getDrivingForceTangent(self, x, T, precPhase, removeCache = False, local_phase_sampling_conditions = None):
+#     """
+#     Gets driving force from parallel tangent calculation
 
-    dg = np.matmul(xD, np.matmul(dMudxParent, xBar.T))
+#     Steps
+#         1. Compute equilibrium to get composition sets (or used previous cached CS)
+#         2. Compute equilibrium of matrix phase at matrix composition
+#         3. Remove composition and extra free energy from conditions
+#         4. Add chemical potential for each component to conditions
+#         5. Compute equilibrium of precipitate phase with new conditions
+#             The calculated v.GE is the driving force
 
-    self._resetDrivingForceCache(precPhase, removeCache)
-    return np.squeeze(dg), np.squeeze(xP[unsortIndices])
+#     This will work for positive and negative driving forces
 
-def _getDrivingForceTangent(self, x, T, precPhase, removeCache = False, local_phase_sampling_conditions = None):
-    """
-    Gets driving force from parallel tangent calculation
+#     Parameters
+#     ----------
+#     x : float or array
+#         Composition of minor element in bulk matrix phase
+#         Use float for binary systems
+#         Use array for multicomponent systems
+#     T : float
+#         Temperature in K
+#     precPhase : str (optional)
+#         Precipitate phase to consider (default is first precipitate phase in list)
+#     removeCache : bool (optional)
+#         If True, this will not cache any equilibrium
+#         This is used for training since training points may not be near each other
 
-    Steps
-        1. Compute equilibrium to get composition sets (or used previous cached CS)
-        2. Compute equilibrium of matrix phase at matrix composition
-        3. Remove composition and extra free energy from conditions
-        4. Add chemical potential for each component to conditions
-        5. Compute equilibrium of precipitate phase with new conditions
-            The calculated v.GE is the driving force
+#     Returns
+#     -------
+#     (driving force, precipitate composition)
+#     Driving force is positive if precipitate can form
+#     Precipitate composition will be None if driving force is negative
+#     """
+#     # Calculate equilibrium with only the parent phase
+#     # Return (None, None) if equilibrium was not successful
+#     result, self._matrix_cs = self.getLocalEq(x, T, 0, [self.phases[0]], composition_sets=self._matrix_cs)
+#     if any(np.isnan(result.chemical_potentials)):
+#         return None, None
 
-    This will work for positive and negative driving forces
+#     # Setup conditions, which include T, P, N and MU (for all elements)
+#     # The nonvacant elements list in the matrix phase record will be sorted
+#     cond = {v.T: T, v.P: 101325, v.N: 1}
+#     non_va_elements = self._matrix_cs[0].phase_record.nonvacant_elements
+#     cond.update({v.MU(e): result.chemical_potentials[i] for i,e in enumerate(non_va_elements)})
 
-    Parameters
-    ----------
-    x : float or array
-        Composition of minor element in bulk matrix phase
-        Use float for binary systems
-        Use array for multicomponent systems
-    T : float
-        Temperature in K
-    precPhase : str (optional)
-        Precipitate phase to consider (default is first precipitate phase in list)
-    removeCache : bool (optional)
-        If True, this will not cache any equilibrium
-        This is used for training since training points may not be near each other
+#     # If we do not have a precipitate composition set, then find one by sampling
+#     if self._compset_cache_df.get(precPhase, None) is None:
+#         dg, prec_cs = self._getPrecCompositionSetSamplingDF(x, T, result.chemical_potentials, precPhase, local_phase_sampling_conditions)
+#         self._compset_cache_df[precPhase] = [prec_cs]
 
-    Returns
-    -------
-    (driving force, precipitate composition)
-    Driving force is positive if precipitate can form
-    Precipitate composition will be None if driving force is negative
-    """
-    # Calculate equilibrium with only the parent phase
-    # Return (None, None) if equilibrium was not successful
-    result, self._matrix_cs = self.getLocalEq(x, T, 0, [self.phases[0]], composition_sets=self._matrix_cs)
-    if any(np.isnan(result.chemical_potentials)):
-        return None, None
+#     #Solving for local equilibrium on precipitate
+#     #The fixed conditions are T, P and MU, so this should solve for precipitate composition and GE
+#     #   Rather than solving for parallel tangent where the driving force is the difference between the chemical potentials of matrix and precipitate phase
+#     #   This instead solves for the offset in the precipitate energy surface to make the precipitate lie on the chemical potential hyperplane of the matrix phase
+#     phases, sub_models = self._setupSubModels([precPhase])
+#     prec_eq_results, prec_cs = local_equilibrium(self.db, self.elements, phases, cond,
+#                                                     sub_models, self.phase_records,
+#                                                     composition_sets=self._compset_cache_df[precPhase], pDens=self.local_pDens)
+#     if any(np.isnan(prec_eq_results.chemical_potentials)):
+#         return None, None
 
-    # Setup conditions, which include T, P, N and MU (for all elements)
-    # The nonvacant elements list in the matrix phase record will be sorted
-    cond = {v.T: T, v.P: 101325, v.N: 1}
-    non_va_elements = self._matrix_cs[0].phase_record.nonvacant_elements
-    cond.update({v.MU(e): result.chemical_potentials[i] for i,e in enumerate(non_va_elements)})
+#     # NOTE: we assum that v.GE is the first state variable in alphabetical order
+#     dg = prec_eq_results.x[0]
+#     xb = np.array(prec_cs[0].X)
 
-    # If we do not have a precipitate composition set, then find one by sampling
-    if self._compset_cache_df.get(precPhase, None) is None:
-        dg, prec_cs = self._getPrecCompositionSetSamplingDF(x, T, result.chemical_potentials, precPhase, local_phase_sampling_conditions)
-        self._compset_cache_df[precPhase] = [prec_cs]
+#     #Check if precipitate composition at equilibrium is the matrix composition
+#     #This can occur in order/disordered models where the miscibility gap is small enough that the parallel tangent can only be found at the matrix composition
+#     #In this case, switch to sampling for the driving force
+#     #This still seems to be an improvement over approximate and curvature methods since this occurs after the driving force becomes negative
+#     mat_comps = np.array(self._matrix_cs[0].X, dtype=np.float64)
+#     if np.allclose(xb, mat_comps, 1e-6):
+#         self._compset_cache_df[precPhase] = None
+#         return self._getDrivingForceSampling(x, T, precPhase, removeCache=removeCache, local_phase_sampling_conditions=local_phase_sampling_conditions)
 
-    #Solving for local equilibrium on precipitate
-    #The fixed conditions are T, P and MU, so this should solve for precipitate composition and GE
-    #   Rather than solving for parallel tangent where the driving force is the difference between the chemical potentials of matrix and precipitate phase
-    #   This instead solves for the offset in the precipitate energy surface to make the precipitate lie on the chemical potential hyperplane of the matrix phase
-    phases, sub_models = self._setupSubModels([precPhase])
-    prec_eq_results, prec_cs = local_equilibrium(self.db, self.elements, phases, cond,
-                                                    sub_models, self.phase_records,
-                                                    composition_sets=self._compset_cache_df[precPhase], pDens=self.local_pDens)
-    if any(np.isnan(prec_eq_results.chemical_potentials)):
-        return None, None
+#     # If all goes well, then we can store the cache
+#     self._compset_cache_df[precPhase] = prec_cs
 
-    # NOTE: we assum that v.GE is the first state variable in alphabetical order
-    dg = prec_eq_results.x[0]
-    xb = np.array(prec_cs[0].X)
+#     sortIndices = np.argsort(self.elements[:-1])
+#     unsortIndices = np.argsort(sortIndices)
 
-    #Check if precipitate composition at equilibrium is the matrix composition
-    #This can occur in order/disordered models where the miscibility gap is small enough that the parallel tangent can only be found at the matrix composition
-    #In this case, switch to sampling for the driving force
-    #This still seems to be an improvement over approximate and curvature methods since this occurs after the driving force becomes negative
-    mat_comps = np.array(self._matrix_cs[0].X, dtype=np.float64)
-    if np.allclose(xb, mat_comps, 1e-6):
-        self._compset_cache_df[precPhase] = None
-        return self._getDrivingForceSampling(x, T, precPhase, removeCache=removeCache, local_phase_sampling_conditions=local_phase_sampling_conditions)
-
-    # If all goes well, then we can store the cache
-    self._compset_cache_df[precPhase] = prec_cs
-
-    sortIndices = np.argsort(self.elements[:-1])
-    unsortIndices = np.argsort(sortIndices)
-
-    self._resetDrivingForceCache(precPhase, removeCache)
-    return np.squeeze(dg), np.squeeze(xb[unsortIndices[1:]])
+#     self._resetDrivingForceCache(precPhase, removeCache)
+#     return np.squeeze(dg), np.squeeze(xb[unsortIndices[1:]])
 
 # def _getCompositionSetsForDF(self, x, T, precPhase):
 #     """

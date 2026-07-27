@@ -861,7 +861,7 @@ def interdiffusivity_from_diff(composition_set, ref_element, diffusivity_callabl
     ele_index = 0
     for a in range(len(elements) - 1):
         if elements[ele_index] == ref_element:
-            eleIndex += 1
+            ele_index += 1
 
         Daa = diffusivity_correction[elements[ele_index]] * diffusivity_callables[elements[ele_index]](callable_input)
         Dnkj[a, a] = Daa
