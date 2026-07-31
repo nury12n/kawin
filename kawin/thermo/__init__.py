@@ -1,4 +1,9 @@
-from .thermodynamics import Thermodynamics, compute_interdiffusivity, compute_tracer_diffusivity
+from .thermodynamics import Thermodynamics, local_equilibrium, get_eq, get_local_eq, ThermodynamicFunction
+from .driving_force import DrivingForceFunction, DrivingForceOutput, compute_driving_force_sampling, compute_driving_force_approximate, compute_driving_force_curvature, compute_driving_force_tangent
+from .diffusivity import compute_interdiffusivity, compute_chemical_diffusivity, compute_tracer_diffusivity
+from .interfacial_composition import InterfacialCompositionFunction, InterfacialCompositionOutput, compute_interfacial_composition_equilibrium, compute_interfacial_composition_curvature
+from .ostwald_ripening import GrowthRateFunction, GrowthRateOutput, compute_growth_rate_binary, compute_growth_rate_curvature, compute_curvature
+
 #from .BinTherm import BinaryThermodynamics
 #from .MultiTherm import MulticomponentThermodynamics
 #from .Surrogate import BinarySurrogate, MulticomponentSurrogate, generateTrainingPoints
