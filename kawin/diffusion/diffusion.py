@@ -9,6 +9,10 @@ from kawin.thermo.thermodynamics import Thermodynamics, ThermodynamicFunction, e
 from kawin.thermo.mobility import x_to_u_frac, expand_x_frac, u_to_x_frac, expand_u_frac, interstitials
 from kawin.diffusion.mesh.mesh_base import MeshBase, ProfileBuilder, BoundaryCondition
 
+# TODO: can we decare MobilityFunction and InterdiffusivityFunction as
+# a function only of conditions. Ideally, I want the diffusion models to
+# be independent of Thermodynamics.
+
 class DiffusionState(ModelState):
     def __init__(self):
         super().__init__()
@@ -66,7 +70,7 @@ class IsothermalTemperature:
         self.T = T
 
     def __call__(self, time: float, z: np.ndarray) -> np.ndarray:
-        return self.T*np.ones(z.shape)
+        return self.T*np.ones(z.shape[0])
 
 class HeatTreatmentProfile:
     def __init__(self, times: list[float], temperatures: list[float]):
@@ -74,7 +78,7 @@ class HeatTreatmentProfile:
         self.temperatures = temperatures
 
     def __call__(self, time: float, z: np.ndarray) -> np.ndarray:
-        return np.interp(time/3600, self.times, self.temperatures[1], self.temperatures[1][0], self.temperatures[1][-1]) * np.ones(z.shape)
+        return np.interp(time/3600, self.times, self.temperatures[1], self.temperatures[1][0], self.temperatures[1][-1]) * np.ones(z.shape[0])
 
 # -- Hash function protocol for LookupTable implementation --
 class HashFunction(Protocol):

@@ -350,3 +350,72 @@ class Spherical1D(FiniteVolume1D):
         '''For spherical: dx/dt = -1/r^2 dJ/dz'''
         fr = fluxes*self.zEdge**2
         return -(fr[1:] - fr[:-1]) / self.z**2 / self.dz
+
+class Cartesian2D(MeshBase):
+    '''
+    2D finite volume mesh
+
+    y - value at node center (Nx, Ny, dims)
+    z - spatial coordinate at node center (Nx, Ny, 2)
+    zCorner - spatial coordinate at node corners (Nx+1, Ny+1, 2)
+    dz - thickness of node in both dimensions
+
+    TODO: boundary conditions not supported yet, so only no flux conditions
+
+    Parameters
+    ----------
+    responses: int | list[str]
+        If int, then this is the number of responses and the names will be R{i}
+        If list[str], then theses are the response names and the number of responses will be the list length
+    zx: list[float]
+        Left and right boundary position of mesh
+    Nx: int
+        Number of cells along x
+    zy: list[float]
+        Top and bottom boundary position of mesh
+    Ny: int
+        Number of cells along y
+    '''
+    def __init__(self, responses, zx, Nx, zy, Ny):
+        super().__init__(responses, Nx*Ny, 2)
+        self.Nx, self.Ny = Nx, Ny
+        self.zx, self.zy = zx, zy
+        self.edges_x = np.linspace(self.zx[0], self.zx[1], self.Nx+1)
+        self.edges_y = np.linspace(self.zy[0], self.zy[1], self.Ny+1)
+        self.corners = np.transpose(np.meshgrid(self.edges_x, self.edges_y), axes=(2,1,0))
+        self.z_mesh = 0.25*(self.corners[:-1,:-1] + self.corners[1:,:-1] + self.corners[:-1,1:] + self.corners[1:,1:])
+        self.z = np.reshape(self.z_mesh, (self.Nx*self.Ny, self.dims))
+        self.dzx = self.edges_x[1]-self.edges_x[0]
+        self.dzy = self.edges_y[1]-self.edges_y[0]
+        self.dz = np.amin((self.dzx, self.dzy))
+
+    def compute_fluxes(self, pairs: list[DiffusionPair]):
+        '''
+        Compute fluxes from (diffusivity, response) pairs on a 2D FVM mesh
+        '''
+        flux_x = np.zeros((self.Nx+1, self.Ny, self.num_responses))
+        flux_y = np.zeros((self.Nx, self.Ny+1, self.num_responses))
+        for p in pairs:
+            D = np.reshape(p.diffusivity, (self.Nx, self.Ny, self.num_responses, *p.diffusivity.shape[2:]))
+            r = np.reshape(p.response, (self.Nx, self.Ny, self.num_responses, *p.response.shape[2:]))
+            avg_func = arithmetic_mean if p.averaging_function is None else p.averaging_function
+
+            # flux along x (neighboring cells to compute D and flux are along x direction, 1st index)
+            Dx_mid = avg_func([D[:-1,:], D[1:,:]])
+            #flux_x[1:-1,:] += self._diffusiveFlux(Dx_mid, r[1:,:], r[:-1,:], self.dzs[0])
+            flux_x[1:-1,:] += diffusive_flux(Dx_mid, r[1:,:], r[:-1,:], self.dzx)
+
+            # flux along y (neighboring cells to compute D and flux are along y direction, 2nd index)
+            Dy_mid = avg_func([D[:,:-1], D[:,1:]])
+            #flux_y[:,1:-1] += self._diffusiveFlux(Dy_mid, r[:,1:], r[:,:-1], self.dzs[1])
+            flux_y[:,1:-1] += diffusive_flux(Dy_mid, r[:,1:], r[:,:-1], self.dzy)
+
+        return flux_x, flux_y
+
+    def compute_dxdt(self, pairs: list[DiffusionPair]):
+        '''
+        dx/dt = -dJx/dz + -dJy/dz
+        '''
+        flux_x, flux_y = self.compute_fluxes(pairs)
+        dxdt = -(flux_x[1:,:] - flux_x[:-1,:]) / self.dzx + -(flux_y[:,1:] - flux_y[:,:-1]) / self.dzy
+        return np.reshape(dxdt, (self.N, self.num_responses))
