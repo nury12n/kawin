@@ -27,11 +27,16 @@ class LookupTable:
     Implements a hash table that stores mobility, phases, phase fractions and
     chemical potentials for a given (composition, temperature) pair
     '''
-    def __init__(self, function: ThermodynamicFunction, hash_function: HashFunction=hash_conditions, precision: int=4):
+    def __init__(
+            self, function: ThermodynamicFunction,
+            hash_function: HashFunction=hash_conditions,
+            squeeze_function = lambda x: x if len(x)>1 else x[0],
+            precision: int=4):
         self.cache = {}
         self.function = function
         self.hash_function = hash_function
         self.set_precision(precision)
+        self.squeeze_function = squeeze_function
 
     def set_precision(self, s: int):
         '''
@@ -49,15 +54,17 @@ class LookupTable:
         '''
         self.precision = np.power(10, int(s))
 
-@enumerate_conditions(InterdiffusivityFunction.squeeze)
-def query_lookup_table(therm: Thermodynamics, conditions: dict[v.StateVariable, float], lookup_table: LookupTable, *args, **kwargs):
-    hash_value = lookup_table.hash_function(conditions, lookup_table.precision, *args, **kwargs)
-    if hash_value in lookup_table.cache:
-        val = lookup_table.cache[hash_value]
-    else:
-        val = lookup_table.function(therm, conditions, *args, **kwargs)
-        lookup_table.cache[hash_value] = val
-    return val
+    def __call__(self, therm: Thermodynamics, conditions: dict[v.StateVariable, float], *args, **kwargs):
+        @enumerate_conditions(self.squeeze_function)
+        def query_lookup_table(therm: Thermodynamics, conditions: dict[v.StateVariable, float], *args, **kwargs):
+            hash_value = self.hash_function(conditions, self.precision, *args, **kwargs)
+            if hash_value in self.cache:
+                val = self.cache[hash_value]
+            else:
+                val = self.function(therm, conditions, *args, **kwargs)
+                self.cache[hash_value] = val
+            return val
+        return query_lookup_table(therm, conditions, *args, **kwargs)
 
 class DiffusionModelTemperature(Protocol):
     def __call__(self, time: float, z: np.ndarray) -> np.ndarray:

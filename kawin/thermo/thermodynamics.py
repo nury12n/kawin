@@ -422,7 +422,7 @@ def get_eq(
 
 def get_local_eq(
         therm: Thermodynamics, conditions: dict[v.StateVariable, float],
-        phases: str | list[str]=None, composition_sets: list[CompositionSet]=None) -> tuple[SolverResult, list[CompositionSet]]:
+        phases: str|list[str] = None, composition_sets: list[CompositionSet] = None) -> tuple[SolverResult, list[CompositionSet]]:
     """
     Calculates local equilibrium at specified x, T, gExtra
 
@@ -460,7 +460,7 @@ def get_local_eq(
         )
 
 def _get_cs_eq(
-        therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
+        therm: Thermodynamics, conditions: dict[v.StateVariable, float|list[float]],
         matrix_phase: str, prec_phase: str, cache: dict[str, any]) -> tuple[np.array, CompositionSet, CompositionSet]:
     """
     Gets composition set from x and T by global equilibrium

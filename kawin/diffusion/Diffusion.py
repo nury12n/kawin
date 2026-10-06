@@ -1,7 +1,7 @@
 import numpy as np
 from kawin.state_process import ModelState, DifferentialEquationProcess
 from kawin.thermo.mobility import x_to_u_frac, expand_x_frac, u_to_x_frac, expand_u_frac, interstitials
-from kawin.diffusion.mesh.mesh_base import MeshBase
+from kawin.diffusion.mesh.mesh_base import MeshBase, ProfileBuilder, BoundaryCondition
 
 class DiffusionState(ModelState):
     def __init__(self):
@@ -13,15 +13,15 @@ class DiffusionState(ModelState):
         return u_to_x_frac(u_ext, all_elements, interstitials)
 
 class DiffusionModel(DifferentialEquationProcess):
-    def __init__(self, mesh: MeshBase, elements):
+    def __init__(self, mesh: MeshBase, elements: list[str], min_composition: float = 1e-8):
         super().__init__()
         self.mesh = mesh
         self.all_elements = elements
         self.ref_element = elements[0]
         self.elements = elements[1:]
-        self.min_composition = 1e-8
+        self.min_composition = min_composition
 
-    def initialize_state(self, profile_builder, bcs=None, state: DiffusionState = None):
+    def initialize_state(self, profile_builder: ProfileBuilder, bcs: BoundaryCondition = None, state: DiffusionState = None):
         if state is None:
             state = DiffusionState()
         state.u = self.mesh.build_response_profile(profile_builder, bcs)
@@ -36,8 +36,7 @@ class DiffusionModel(DifferentialEquationProcess):
         state.u = u_full[:,1:]
         return state
 
-    def apply_dxdt(self, state: DiffusionState, dxdt, dt: float):
-        #state.time += dt
+    def apply_dxdt(self, state: DiffusionState, dxdt: any, dt: float):
         state.u += dxdt*dt
 
     def finalize(self, state: DiffusionState):

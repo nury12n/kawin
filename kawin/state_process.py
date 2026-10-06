@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from typing import Protocol
 import copy
@@ -16,41 +15,68 @@ class ModelProcess(ABC):
 
     @abstractmethod
     def progress_state(self, state: ModelState, time: float):
+        """This should not touch state.time. That will be handled in Solver"""
         ...
 
     @abstractmethod
     def finalize(self, state: ModelState):
         ...
 
+class ComputeDerivativeFunction(Protocol):
+    def __call__(self, state: ModelState) -> any:
+        """
+        Structure of dxdt can be anything since ApplyDerivativeFunction
+        handles the relationship between state and dxdt
+        """
+        ...
+
+class ApplyDerivativeFunction(Protocol):
+    def __call__(self, state: ModelState, dxdt: any, dt: float):
+        """Directly modifies state"""
+        ...
+
 class Iterator(Protocol):
-    def __call__(self, state: ModelState, compute_dxdt, apply_dxdt, dxdt_0, dt):
+    def __call__(
+            self, state: ModelState,
+            compute_dxdt: ComputeDerivativeFunction, apply_dxdt: ApplyDerivativeFunction,
+            dxdt_0: any, dt: float):
         ...
 
     @staticmethod
-    def explicit_euler(state: ModelState, compute_dxdt, apply_dxdt, dxdt_0, dt):
+    def explicit_euler(
+            state: ModelState,
+            compute_dxdt: ComputeDerivativeFunction, apply_dxdt: ApplyDerivativeFunction,
+            dxdt_0: any, dt: float):
         apply_dxdt(state, dxdt_0, dt)
 
     @staticmethod
-    def rk4(state: ModelState, compute_dxdt, apply_dxdt, dxdt_0, dt):
+    def rk4(
+            state: ModelState,
+            compute_dxdt: ComputeDerivativeFunction, apply_dxdt: ApplyDerivativeFunction,
+            dxdt_0: any, dt: float):
+        # TODO: I don't like invoking deepcopy here, should we have a method in
+        # state to handle copies?
         k1 = dxdt_0
-        dxdtsum = k1
         x1 = copy.deepcopy(state)
         apply_dxdt(x1, k1, dt/2)
 
         k2 = compute_dxdt(x1)
-        dxdtsum += 2*k2
         x2 = copy.deepcopy(state)
         apply_dxdt(x2, k2, dt/2)
 
         k3 = compute_dxdt(x2)
-        dxdtsum += 2*k3
         x3 = copy.deepcopy(state)
         apply_dxdt(x3, k3, dt)
 
         k4 = compute_dxdt(x3)
-        dxdtsum += k4
 
-        apply_dxdt(state, dxdtsum/6, dt)
+        # RK4 is generally shown as f_t+1 = f_t + (k1+2*k2+2*k3+k4)*dt
+        # We split it up here instead to avoid assumptions on whether dxdt can be added together
+        #apply_dxdt(state, (k1+2*k2+2*k3+k4)/6, dt)
+        apply_dxdt(state, k1, dt/6)
+        apply_dxdt(state, k2, dt/3)
+        apply_dxdt(state, k3, dt/3)
+        apply_dxdt(state, k4, dt/6)
 
 class DifferentialEquationProcess(ModelProcess):
     def __init__(self, iterator: Iterator = Iterator.explicit_euler):
@@ -60,14 +86,16 @@ class DifferentialEquationProcess(ModelProcess):
 
     @abstractmethod
     def compute_dxdt(self, state: ModelState) -> any:
+        """Follows ComputeDerivativeFunction protocol"""
         ...
 
     @abstractmethod
-    def compute_max_dt(self, state: ModelState, dxdt) -> float:
+    def compute_max_dt(self, state: ModelState, dxdt: any) -> float:
         ...
 
     @abstractmethod
-    def apply_dxdt(self, state: ModelState, dxdt, dt: float):
+    def apply_dxdt(self, state: ModelState, dxdt: any, dt: float):
+        """Follows ApplyDerivativeFunction protocol"""
         ...
 
     def get_next_time(self, state: ModelState):
@@ -77,7 +105,6 @@ class DifferentialEquationProcess(ModelProcess):
 
     def progress_state(self, state: ModelState, time: float):
         self.iterator(state, self.compute_dxdt, self.apply_dxdt, self.dxdt, time-state.time)
-        #state.time = time
 
 class EventGenerator(ABC):
     @abstractmethod
@@ -112,7 +139,6 @@ class DiscreteEventProcess(ModelProcess):
 
     def progress_state(self, state: ModelState, time: float):
         self.execute_event(state, self.next_event_id)
-        #state.time = time
 
     def finalize(self, state: ModelState):
         if self.update_all_events:

@@ -12,16 +12,39 @@ MobilityData = namedtuple(
     ['mobility', 'phases', 'phase_fractions', 'chemical_potentials']
     )
 
-class HomogenizationFunction(Protocol):
+class AveragingFunction(Protocol):
     def __call__(self, mobility: np.array, phase_fracs: np.array) -> np.array:
+        """
+        Returns
+            mobility array - (e,)
+        """
         ...
 
 class PostProcessFunction(Protocol):
     def __call__(mob_data: MobilityData) -> tuple[np.array, np.array]:
+        """
+        Returns
+            mobility array - (p,e)
+            phase fractions array - (p,)
+        """
         ...
 
 class MobilityFunction(Protocol):
     def __call__(therm: Thermodynamics, conditions: dict[v.StateVariable, float]) -> MobilityData:
+        ...
+
+class HomogenizationFunction(Protocol):
+    def __call__(
+            therm : Thermodynamics, conditions: dict[v.StateVariable, float],
+            mobility_func: MobilityFunction,
+            post_process_func: PostProcessFunction,
+            avg_func: AveragingFunction,
+            *args, **kwargs) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Returns
+            average mobility array - (N, e)
+            chemical potential array - (N, e)
+        """
         ...
 
 def wiener_upper(mobility: np.array, phase_fracs: np.array) -> np.array:
@@ -201,14 +224,14 @@ def compute_mobility(therm: Thermodynamics, conditions: dict[v.StateVariable, fl
         raise e
 
     # Compute mobility and phase fractions
-    mob = -1*np.ones((len(comp_sets), len(therm.elements)-1))
+    mob = -1*np.ones((len(comp_sets), len(therm.nonvacant_elements)))
     phases, phase_fracs = zip(*[(cs.phase_record.phase_name, cs.NP) for cs in comp_sets])
     phases = np.array(phases)
     phase_fracs = np.array(phase_fracs, dtype=np.float64)
     for p, cs in enumerate(comp_sets):
         if therm.mobility_callables.get(phases[p], None) is not None:
             mob[p,:] = mobility_from_composition_set(cs, therm.mobility_callables[phases[p]], therm.mobility_correction)
-            mob[p,:] *= x_to_u_frac(np.array(cs.X, dtype=np.float64), therm.elements[:-1], interstitials)
+            mob[p,:] *= x_to_u_frac(np.array(cs.X, dtype=np.float64), therm.nonvacant_elements, interstitials)
 
     return MobilityData(mobility = mob, phases = phases, phase_fractions = phase_fracs, chemical_potentials=chemical_potentials)
 
@@ -216,7 +239,11 @@ def squeeze_homogenization_results(values):
     return np.squeeze([vals[0] for vals in values]), np.squeeze([vals[1] for vals in values])
 
 @enumerate_conditions(squeeze_homogenization_results)
-def compute_homogenization_function(therm : Thermodynamics, conditions: dict[v.StateVariable, float], homogenization_func: HomogenizationFunction, post_process_func: PostProcessFunction, mobility_func: MobilityFunction = compute_mobility):
+def compute_homogenization_function(
+        therm : Thermodynamics, conditions: dict[v.StateVariable, float],
+        mobility_func: MobilityFunction = compute_mobility,
+        post_process_func: PostProcessFunction = post_process_do_nothing,
+        avg_func: AveragingFunction = hashin_shtrikman_lower):
     '''
     Compute homogenization function (defined by HomogenizationParameters) for list of x,T
 
@@ -241,5 +268,5 @@ def compute_homogenization_function(therm : Thermodynamics, conditions: dict[v.S
     '''
     mobility_data = mobility_func(therm, conditions)
     mob, phase_fracs = post_process_func(mobility_data)
-    avg_mob = homogenization_func(mob, phase_fracs)
+    avg_mob = avg_func(mob, phase_fracs)
     return avg_mob, mobility_data.chemical_potentials
