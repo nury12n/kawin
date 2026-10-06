@@ -134,15 +134,15 @@ def diffusive_flux(D, r_high, r_low, dz):
 class BoundaryCondition(ABC):
     @abstractmethod
     def set_initial_response(self, mesh, y):
-        raise NotImplementedError()
+        pass
 
     @abstractmethod
     def adjust_fluxes(self, mesh, fluxes):
-        raise NotImplementedError()
+        pass
 
     @abstractmethod
     def adjust_dxdt(self, mesh, dxdt):
-        raise NotImplementedError()
+        pass
 
 class ProfileFunction(Protocol):
     def __call__(self, z: np.ndarray) -> np.ndarray:
@@ -357,7 +357,7 @@ class MeshBase(ABC):
         dxdt: np.ndarray
             Must be same shape as y
         '''
-        raise NotImplementedError()
+        pass
 
     def get_response_coordinates(self, y):
         '''Returns y as [N,e] and z as [N,dims] arrays to compute response terms'''

@@ -343,7 +343,7 @@ class HomogenizationModel(DiffusionModel):
         # constraints
         self.max_composition_change = 0.002
 
-    def compute_dxdt(self, state: DiffusionState) -> np.ndarray:
+    def compute_pairs(self, state: DiffusionState) -> np.ndarray:
         '''
         Compute diffusivity-response pairs
 
@@ -439,7 +439,7 @@ class HomogenizationModel(DiffusionModel):
                 averaging_function=_ideal_mean,
                 at_node_function=_at_node_product
             ))
-        return self.mesh.compute_dxdt(pairs)
+        return pairs
 
     def compute_max_dt(self, state: DiffusionState, dxdt: np.ndarray) -> float:
         return self.max_composition_change / np.amax(np.abs(dxdt[dxdt!=0]))

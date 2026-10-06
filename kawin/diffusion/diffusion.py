@@ -1,4 +1,5 @@
 from typing import Protocol
+from abc import abstractmethod
 
 import numpy as np
 
@@ -7,7 +8,7 @@ from pycalphad import variables as v
 from kawin.state_process import ModelState, DifferentialEquationProcess
 from kawin.thermo.thermodynamics import Thermodynamics, ThermodynamicFunction, enumerate_conditions
 from kawin.thermo.mobility import x_to_u_frac, expand_x_frac, u_to_x_frac, expand_u_frac, interstitials
-from kawin.diffusion.mesh.mesh_base import MeshBase, ProfileBuilder, BoundaryCondition
+from kawin.diffusion.mesh.mesh_base import MeshBase, ProfileBuilder, BoundaryCondition, DiffusionPair
 
 # TODO: can we decare MobilityFunction and InterdiffusivityFunction as
 # a function only of conditions. Ideally, I want the diffusion models to
@@ -31,6 +32,14 @@ class DiffusionModel(DifferentialEquationProcess):
         self.elements = elements[1:]
         self.min_composition = min_composition
 
+    @abstractmethod
+    def compute_pairs(self, state: DiffusionState) -> list[DiffusionPair]:
+        pass
+
+    @abstractmethod
+    def compute_max_dt(self, state: DiffusionState, dxdt: np.ndarray) -> float:
+        pass
+
     def initialize_state(self, profile_builder: ProfileBuilder, bcs: BoundaryCondition = None, state: DiffusionState = None):
         if state is None:
             state = DiffusionState()
@@ -45,6 +54,9 @@ class DiffusionModel(DifferentialEquationProcess):
         u_full = x_to_u_frac(u_full, self.all_elements, interstitials, return_usum=False)
         state.u = u_full[:,1:]
         return state
+
+    def compute_dxdt(self, state: DiffusionState) -> np.ndarray:
+        return self.mesh.compute_dxdt(self.compute_pairs(state))
 
     def apply_dxdt(self, state: DiffusionState, dxdt: any, dt: float):
         state.u += dxdt*dt

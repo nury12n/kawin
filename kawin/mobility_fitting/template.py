@@ -66,7 +66,7 @@ class SiteFractionGenerator(ABC):
         -------
         {v.SiteFraction: float}
         '''
-        raise NotImplementedError()
+        pass
 
 class EquilibriumSiteFractionGenerator(SiteFractionGenerator):
     '''

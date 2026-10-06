@@ -39,7 +39,7 @@ class SinglePhaseModel(DiffusionModel):
         # constraints
         self.von_neumann_threshold = 0.4
 
-    def compute_dxdt(self, state: DiffusionState) -> np.ndarray:
+    def compute_pairs(self, state: DiffusionState) -> list[DiffusionPair]:
         u = expand_u_frac(state.u, self.all_elements, self.ref_element, interstitials)
         x = u_to_x_frac(u, self.all_elements, interstitials)[:,1:]
 
@@ -70,7 +70,7 @@ class SinglePhaseModel(DiffusionModel):
                     ))
 
         self._curr_dt = self.von_neumann_threshold * self.mesh.dz**2 / np.amax(d) / self.mesh.dims
-        return self.mesh.compute_dxdt(pairs)
+        return pairs
 
     def compute_max_dt(self, state: DiffusionState, dxdt: np.ndarray) -> float:
         return self._curr_dt

@@ -11,16 +11,16 @@ class ModelState:
 class ModelProcess(ABC):
     @abstractmethod
     def get_next_time(self, state: ModelState) -> float:
-        ...
+        pass
 
     @abstractmethod
     def progress_state(self, state: ModelState, time: float):
         """This should not touch state.time. That will be handled in Solver"""
-        ...
+        pass
 
     @abstractmethod
     def finalize(self, state: ModelState):
-        ...
+        pass
 
 class ComputeDerivativeFunction(Protocol):
     def __call__(self, state: ModelState) -> any:
@@ -87,16 +87,16 @@ class DifferentialEquationProcess(ModelProcess):
     @abstractmethod
     def compute_dxdt(self, state: ModelState) -> any:
         """Follows ComputeDerivativeFunction protocol"""
-        ...
+        pass
 
     @abstractmethod
     def compute_max_dt(self, state: ModelState, dxdt: any) -> float:
-        ...
+        pass
 
     @abstractmethod
     def apply_dxdt(self, state: ModelState, dxdt: any, dt: float):
         """Follows ApplyDerivativeFunction protocol"""
-        ...
+        pass
 
     def get_next_time(self, state: ModelState):
         self.dxdt = self.compute_dxdt(state)
@@ -109,15 +109,15 @@ class DifferentialEquationProcess(ModelProcess):
 class EventGenerator(ABC):
     @abstractmethod
     def query(self, state: ModelState) -> float:
-        ...
+        pass
 
     @abstractmethod
     def execute(self, state: ModelState):
-        ...
+        pass
 
     @abstractmethod
     def reset(self, state: ModelState):
-        ...
+        pass
 
 class DiscreteEventProcess(ModelProcess):
     def __init__(self, event_generators: list[EventGenerator], update_all_events: bool=False):

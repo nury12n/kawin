@@ -195,12 +195,12 @@ class MidPointCalculator(ABC):
     @staticmethod
     @abstractmethod
     def get_diffusivity_coordinates(y, z, z_edge, is_periodic = False, *args, **kwargs):
-        raise NotImplementedError()
+        pass
 
     @staticmethod
     @abstractmethod
     def get_D_mid(D, is_periodic=False, at_node_func=no_change_at_node, avg_func=arithmetic_mean, *args, **kwargs):
-        raise NotImplementedError()
+        pass
 
 class FVM1DMidpoint(MidPointCalculator):
     @staticmethod
@@ -271,15 +271,16 @@ class FiniteVolume1D(MeshBase):
         self.dz = self.z[1] - self.z[0]
         self.midpoint_calculator = midpoint_calculator
 
+    @abstractmethod
+    def flux_to_dxdt(self, fluxes):
+        '''Given fluxes, compute dx/dt. This depends on coordinate system'''
+        pass
+
     def build_response_profile(self, profile_builder, bcs = None):
         if bcs is None:
             bcs = MixedBoundary1D(self.num_responses)
         self.bcs = bcs
         return super().build_response_profile(profile_builder, self.bcs)
-
-    def _flux_to_dxdt(self, fluxes):
-        '''Given fluxes, compute dx/dt. This depends on coordinate system'''
-        raise NotImplementedError()
 
     def compute_fluxes(self, pairs: list[DiffusionPair]):
         '''Compute fluxes from (diffusivity, response) pairs on a 1D FVM mesh'''
@@ -305,7 +306,7 @@ class FiniteVolume1D(MeshBase):
         '''Computes fluxes, correct fluxes for boundary conditions, compute dx/dt and correct dx/dt for boundary conditions'''
         fluxes = self.compute_fluxes(pairs)
         self.bcs.adjust_fluxes(self, fluxes)
-        dxdt = self._flux_to_dxdt(fluxes)
+        dxdt = self.flux_to_dxdt(fluxes)
         self.bcs.adjust_dxdt(self, dxdt)
         return dxdt
 
@@ -314,7 +315,7 @@ class FiniteVolume1D(MeshBase):
         return self.midpoint_calculator.get_diffusivity_coordinates(y, self.z, self.edges, is_periodic=isinstance(self.bcs, PeriodicBoundary1D))
 
 class Cartesian1D(FiniteVolume1D):
-    def _flux_to_dxdt(self, fluxes):
+    def flux_to_dxdt(self, fluxes):
         '''For cartesian: dx/dt = -dJ/dz'''
         return -(fluxes[1:] - fluxes[:-1]) / self.dz
 
@@ -329,7 +330,7 @@ class Cylindrical1D(FiniteVolume1D):
             raise ValueError('Periodic boundary conditions are not-defined on cylindrical coordinates')
         return super().build_response_profile(profile_builder, bcs)
 
-    def _flux_to_dxdt(self, fluxes):
+    def flux_to_dxdt(self, fluxes):
         '''For cylindrical: dx/dt = -1/r dJ/dz'''
         fr = fluxes*self.zEdge
         return -(fr[1:] - fr[:-1]) / self.z / self.dz
@@ -346,7 +347,7 @@ class Spherical1D(FiniteVolume1D):
             raise ValueError('Periodic boundary conditions are not-defined on spherical coordinates')
         return super().build_response_profile(profile_builder, bcs)
 
-    def _flux_to_dxdt(self, fluxes):
+    def flux_to_dxdt(self, fluxes):
         '''For spherical: dx/dt = -1/r^2 dJ/dz'''
         fr = fluxes*self.zEdge**2
         return -(fr[1:] - fr[:-1]) / self.z**2 / self.dz
