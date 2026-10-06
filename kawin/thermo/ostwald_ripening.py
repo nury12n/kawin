@@ -203,13 +203,13 @@ def _curvature_factor_from_eq(
         Dnkj, dmudx_matrix, inv_mob = mob_funcs.inverse_mobility_from_diffusivity(
             chemical_potentials, cs_matrix,
             ref_element, therm.diffusivity_callables[matrix_phase],
-            diffusivity_correction=therm.mobility_correction, parameters=therm._parameters
+            diffusivity_correction=therm.mobility_correction, parameters=therm.parameters
             )
 
         #NOTE: This is note tested yet
         dtrace = mob_funcs.tracer_diffusivity_from_diff(
             cs_matrix, therm.diffusivity_callables[matrix_phase],
-            diffusivity_correction=therm.mobility_correction, parameters=therm._parameters
+            diffusivity_correction=therm.mobility_correction, parameters=therm.parameters
             )
     else:
         Dnkj, dmudx_matrix, inv_mob = mob_funcs.inverse_mobility(
@@ -217,11 +217,11 @@ def _curvature_factor_from_eq(
             ref_element, therm.mobility_callables[matrix_phase],
             mobility_correction=therm.mobility_correction,
             vacancy_poor_interstitial_sublattice=therm.vacancy_poor_interstitial_sublattice.get(matrix_phase, False),
-            parameters=therm._parameters
+            parameters=therm.parameters
             )
         dtrace = mob_funcs.tracer_diffusivity(
             cs_matrix, therm.mobility_callables[matrix_phase],
-            mobility_correction=therm.mobility_correction, parameters=therm._parameters)
+            mobility_correction=therm.mobility_correction, parameters=therm.parameters)
 
     ref_index = therm.nonvacant_elements.index(ref_element)
     x = np.delete(x_full, ref_index)

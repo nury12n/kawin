@@ -8,7 +8,7 @@ from pycalphad.core.composition_set import CompositionSet
 from kawin.thermo.thermodynamics import Thermodynamics, enumerate_conditions, _get_phase, get_local_eq
 import kawin.thermo.mobility as mob_funcs
 
-class InterdiffusitivityFunction(Protocol):
+class InterdiffusivityFunction(Protocol):
     def __call__(
             self, therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
             ref_element: str=None, phase: str=None, cache: dict[str, any]={}, **kwargs) -> np.array:
@@ -18,7 +18,7 @@ class InterdiffusitivityFunction(Protocol):
     def squeeze(values: list[np.array]):
         return np.squeeze(values)
 
-class ChemicalDiffusitivityFunction(Protocol):
+class ChemicalDiffusivityFunction(Protocol):
     def __call__(
             self, therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
             phase: str=None, cache: dict[str, any]={}, **kwargs) -> np.array:
@@ -28,7 +28,7 @@ class ChemicalDiffusitivityFunction(Protocol):
     def squeeze(values: list[np.array]):
         return np.squeeze(values)
 
-class TracerDiffusitivityFunction(Protocol):
+class TracerDiffusivityFunction(Protocol):
     def __call__(
             self, therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
             phase: str=None, cache: dict[str, any]={}, **kwargs) -> np.array:
@@ -38,7 +38,7 @@ class TracerDiffusitivityFunction(Protocol):
     def squeeze(values: list[np.array]):
         return np.squeeze(values)
 
-@enumerate_conditions(InterdiffusitivityFunction.squeeze)
+@enumerate_conditions(InterdiffusivityFunction.squeeze)
 def compute_interdiffusivity(
     therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
     ref_element: str, phase: str=None, cache: dict[str, list[CompositionSet]]=None, **kwargs) -> np.array:
@@ -75,20 +75,20 @@ def compute_interdiffusivity(
     if therm.mobility_callables.get(phase, None) is None:
         Dnkj = mob_funcs.interdiffusivity_from_diff(
             cs_matrix, ref_element, therm.diffusivity_callables[phase],
-            diffusivity_correction=therm.mobility_correction, parameters=therm._parameters
+            diffusivity_correction=therm.mobility_correction, parameters=therm.parameters
             )
     else:
         Dnkj = mob_funcs.interdiffusivity(
             chemical_potentials, cs_matrix, ref_element, therm.mobility_callables[phase],
             mobility_correction=therm.mobility_correction,
             vacancy_poor_interstitial_sublattice=therm.vacancy_poor_interstitial_sublattice.get(phase, False),
-            parameters=therm._parameters
+            parameters=therm.parameters
             )
 
     cache[f'{phase}_diff'] = composition_sets
     return Dnkj
 
-@enumerate_conditions(ChemicalDiffusitivityFunction.squeeze)
+@enumerate_conditions(ChemicalDiffusivityFunction.squeeze)
 def compute_chemical_diffusivity(
     therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
     phase: str=None, cache: dict[str, list[CompositionSet]]=None, **kwargs) -> np.array:
@@ -125,13 +125,13 @@ def compute_chemical_diffusivity(
             chemical_potentials, cs_matrix, therm.mobility_callables[phase],
             mobility_correction=therm.mobility_correction,
             vacancy_poor_interstitial_sublattice=therm.vacancy_poor_interstitial_sublattice.get(phase, False),
-            parameters=therm._parameters
+            parameters=therm.parameters
         )
 
     cache[f'{phase}_diff'] = composition_sets
     return Dkj
 
-@enumerate_conditions(TracerDiffusitivityFunction.squeeze)
+@enumerate_conditions(TracerDiffusivityFunction.squeeze)
 def compute_tracer_diffusivity(
     therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
     phase: str=None, cache: dict[str, list[CompositionSet]]={}, **kwargs) -> np.array:
@@ -164,12 +164,12 @@ def compute_tracer_diffusivity(
         #NOTE: This is not tested yet
         dtrace = mob_funcs.tracer_diffusivity_from_diff(
             cs_matrix, therm.diffusivity_callables[phase],
-            diffusivity_correction=therm.mobility_correction, parameters=therm._parameters
+            diffusivity_correction=therm.mobility_correction, parameters=therm.parameters
             )
     else:
         dtrace = mob_funcs.tracer_diffusivity(
             cs_matrix, therm.mobility_callables[phase],
-            mobility_correction=therm.mobility_correction, parameters=therm._parameters
+            mobility_correction=therm.mobility_correction, parameters=therm.parameters
             )
 
     cache[f'{phase}_diff'] = composition_sets

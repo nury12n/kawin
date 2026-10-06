@@ -1,3 +1,87 @@
+from collections import namedtuple
+
+import numpy as np
+
+from pycalphad import variables as v
+
+from kawin.thermo.thermodynamics import Thermodynamics
+from kawin.thermo.mobility import expand_u_frac, u_to_x_frac, interstitials
+from kawin.thermo.diffusivity import compute_interdiffusivity
+from kawin.diffusion.mesh.MeshBase import DiffusionPair, arithmeticMean
+
+PairCoordinates = namedtuple('PairCoordinates', ['y', 'z'])
+
+def homogenization_diffusion_pairs(therm: Thermodynamics, u, time, diff_coords, response_coords, ref_element, T_func, homogenization_function, homogenization_parameters, **kwargs) -> list[DiffusionPair]:
+    '''
+    Compute diffusivity-response pairs
+
+    J_k = -\Gamma_k d\mu_k/dz - \eps*RT*\Gamma_k/u_k du_k/dz
+    J^n_k = -sum(\delta_jk - u_k) J_j
+    dx_k/dt = -dJ^n_k/dz
+
+    For x_k, a pair would comprise of:
+        (\delta_jk - u_k) \Gamma_j, \mu_k
+        (\delta_jk - u_k) \eps*RT*\Gamma_k/u_k, u_k
+    '''
+    # x is shape (N,e), so convert to mesh shape to obtain diffusion/response coordinates
+    # TODO: this feels inefficient to convert u->x for mobility, then back to u for flux calculation
+    u = expand_u_frac(u, therm.nonvacant_elements, ref_element, interstitials)
+    x = u_to_x_frac(u, therm.nonvacant_elements, interstitials)
+
+    # temp is (N,e)
+    T_d = T_func(diff_coords.z, time)
+    T_r = T_func(response_coords.z, time)
+    # mob and mu are (N,e)
+    mob_d, mu_d = homogenization_function(therm, diff_coords.y, T_d, homogenization_parameters)
+    mob_r, mu_r = homogenization_function(therm, response_coords.y, T_r, homogenization_parameters)
+
+    # Full composition
+    # x_full = (N,e+1), u_full = (N,e+1), u_term = (N,e+1,e+1)
+    x_fullD = np.concatenate((1-np.sum(diff_coords.y, axis=1)[:,np.newaxis], diff_coords.y), axis=1)
+    u_fullD = x_to_u_frac(x_fullD, therm.nonvacant_elements, interstitials)
+    # u_term is the (\delta_jk - u_k), which converts from a lattice fixed frame to a volume fixed frame
+    u_termD = (np.eye(len(therm.nonvacant_elements))[np.newaxis,:,:] - u_fullD[:,:,np.newaxis])
+    # When converting to a volume fixed frame, only the substitutional (or volume contributing) elements
+    # contribute to the corrected flux. To account for interstitials, we replace the column
+    # corresponding to the interstitial (which at this point is [u_A, u_B, 1-u_I, u_D] where I is interstital)
+    # to be [0, 0, 1, 0]. So the column is 0 except for the interstitial row
+    for i,e in enumerate(therm.nonvacant_elements):
+        if e in interstitials:
+            u_termD[:,:,i] = 0
+            u_termD[:,i,i] = 1
+
+    x_r = np.concatenate((1-np.sum(response_coords.y, axis=1)[:,np.newaxis], response_coords.y), axis=1)
+    u_r = x_to_u_frac(x_r, therm.nonvacant_elements, interstitials)
+
+    # mobility matrix is repeated among rows
+    mob_d_matrix = np.repeat(mob_d[:,np.newaxis,:], therm.num_elements, axis=1)
+    # We'll group eps*R with T here
+    T_matrix = np.tile(T_d[:,np.newaxis,np.newaxis], (1, therm.num_elements, therm.num_elements)) * homogenizationParameters.eps * GAS_CONSTANT
+    # inverse composition and response is repeated among rows
+    inv_u_matrix = np.repeat(1/u_fullD[:,np.newaxis,:], therm.num_elements, axis=1)
+    mu_matrix = np.repeat(mu_r[:,np.newaxis,:], therm.num_elements, axis=1)
+    u_r_matrix = np.repeat(u_r[:,np.newaxis,:], therm.num_elements, axis=1)
+
+    pairs = []
+    # Since volume fixed frame leads to 1 dependent component (which we take as the first)
+    # we don't need to take the 1st row of mob_term and ideal_term
+    for i in range(len(therm.nonvacant_elements)):
+        # homogenization contribution - (vol transform * \Gamma) * dmu/dz
+        pairs.append(DiffusionPair(
+            diffusivity=np.transpose(np.array([u_termD[:,1:,i], mob_d_matrix[:,1:,i]]), axes=(1,2,0)),
+            response=mu_matrix[:,1:,i],
+            averageFunction=_homogenizationMean,
+            atNodeFunction=_atNodeProduct
+        ))
+        # ideal contribution - (vol transform * eps*R*T * \Gamma / u) * du/dz
+        pairs.append(DiffusionPair(
+            diffusivity=np.transpose(np.array([u_termD[:,1:,i], T_matrix[:,1:,i], mob_d_matrix[:,1:,i], inv_u_matrix[:,1:,i]]), axes=(1,2,0)),
+            response=u_r_matrix[:,1:,i],
+            averageFunction=_idealMean,
+            atNodeFunction=_atNodeProduct
+        ))
+    return pairs
+
 import numpy as np
 
 from kawin.Constants import GAS_CONSTANT
@@ -44,20 +128,20 @@ def _idealMean(Ds):
 def _atNodeProduct(Ds):
     return np.prod(Ds, axis=-1)
 
-class HomogenizationModel(DiffusionModel): 
-    def __init__(self, mesh, elements, phases, 
+class HomogenizationModel(DiffusionModel):
+    def __init__(self, mesh, elements, phases,
                  thermodynamics = None,
-                 temperature = None, 
+                 temperature = None,
                  homogenizationParameters = None,
                  constraints = None,
                  record = False):
-        super().__init__(mesh=mesh, elements=elements, phases=phases, 
+        super().__init__(mesh=mesh, elements=elements, phases=phases,
                          thermodynamics=thermodynamics,
-                         temperature=temperature,  
+                         temperature=temperature,
                          constraints=constraints,
                          record=record)
         self.homogenizationParameters = homogenizationParameters if homogenizationParameters is not None else HomogenizationParameters()
-    
+
     def _getPairs(self, t, xCurr):
         '''
         Compute diffusivity-response pairs
@@ -132,7 +216,7 @@ class HomogenizationModel(DiffusionModel):
                 atNodeFunction=_atNodeProduct
             ))
         return pairs
-    
+
     def getDt(self, dXdt):
         '''
         Time increment

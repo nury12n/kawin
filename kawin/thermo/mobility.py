@@ -6,22 +6,23 @@ from pycalphad.io.tdb import get_supported_variables
 from symengine import exp, Symbol, Add
 from kawin.thermo.free_energy_hessian import partial_dmudx, total_dmudx
 
-#List of interstitial elements
+# List of interstitial elements
 # When calculating interdiffusivity, we do not require reference element
 # When calculating the mobility factor, we have an additional vacancy term to multiply by
-#As a list here, hopefully this should be editable by a user outside of this module - may have to edit __init__.py
+# As a list here, hopefully this should be editable by a user outside of this module - may have to edit __init__.py
 interstitials = ['C', 'N', 'O', 'H', 'B']
 
-def expand_x_frac(x_frac: list[float]):
+def expand_x_frac(x_frac: list[float], elements: list[str], ref_element: str):
     '''
     Converts x_frac (N,e-1) to x_full (N,e)
-    Assumes the first element is dependent
-        Where x[0] = 1-sum(x[1:])
+    Fills reference element index with 1-sum(x)
     '''
     x_frac = np.atleast_2d(x_frac)
-    return np.squeeze(np.concatenate((1-np.sum(x_frac, axis=1)[:,np.newaxis], x_frac), axis=1))
+    x_ref = 1-np.sum(x_frac, axis=1)
+    return np.squeeze(np.insert(x_frac, elements.index(ref_element), x_ref, axis=1))
+    #return np.squeeze(np.concatenate((1-np.sum(x_frac, axis=1)[:,np.newaxis], x_frac), axis=1))
 
-def expand_u_frac(u_frac: list[float], elements: list[str], interstitial_list: list[str]):
+def expand_u_frac(u_frac: list[float], elements: list[str], ref_element: str, interstitial_list: list[str]):
     '''
     Converts u_frac (N,e-1) to u_full (N,e)
     Assumes first element is dependent
@@ -32,11 +33,12 @@ def expand_u_frac(u_frac: list[float], elements: list[str], interstitial_list: l
     u_sub = [u_frac[:,i] for i,e in enumerate(elements[1:]) if e not in interstitial_list]
     # If all independent elements are interstitial, then u-frac of dependent is 1
     if len(u_sub) == 0:
-        u_sum = np.ones((len(u_frac), 1))
+        u_ref = np.ones(len(u_frac))
     # Otherwise, u-frac of dependent is 1-u_sub
     else:
-        u_sum = 1-np.sum(u_sub, axis=0)[:,np.newaxis]
-    return np.squeeze(np.concatenate((u_sum, u_frac), axis=1))
+        u_ref = 1-np.sum(u_sub, axis=0)
+    return np.squeeze(np.insert(u_frac, elements.index(ref_element), u_ref, axis=1))
+    #return np.squeeze(np.concatenate((u_sum, u_frac), axis=1))
 
 def x_to_u_frac(x_frac: list[float], elements: list[str], interstitial_list: list[str], return_usum: list[float] = False):
     '''
@@ -67,7 +69,7 @@ def u_to_x_frac(u_frac: list[float], elements: list[str], interstitial_list: lis
 
     b = np.zeros((*u_frac.shape, 1))
     # Summation constraint (sum(x) = 1)
-    # We can replace first row of a here
+    # We can replace first row with the summation contraint to satisfy N-1 constraint
     b[:,0] = 1
     a[:,0] = 1
 

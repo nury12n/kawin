@@ -104,7 +104,7 @@ def _sample_precipitate_cs(
     driving force - max free energy difference
     precipitate composition set - corresponds to max driving force
     """
-    orderTol = -1e-8
+    order_tol = -1e-8
     state_cond = {v.GE: therm.g_offset, v.N: 1, v.P: conditions[v.P], v.T: conditions[v.T]}
     str_cond = {str(key): val for key,val in state_cond.items()}
 
@@ -145,7 +145,7 @@ def _sample_precipitate_cs(
     #Find maximum driving force and corresponding composition -----------------------------------------------------------------------------------
     #For phases with order/disorder transition, a filter is applied such that it will only use points that are below the disordered energy surface
     if therm.is_ordered_phase.get(prec_phase, False):
-        indices = np.squeeze(ordered_points.OCM) < orderTol
+        indices = np.squeeze(ordered_points.OCM) < order_tol
         diff = diff[indices]
         y = y[indices]
 
