@@ -131,19 +131,6 @@ def diffusive_flux(D, r_high, r_low, dz):
     '''Flux = -D (r1 - r0) / dz'''
     return -D * (r_high - r_low) / dz
 
-class BoundaryCondition(ABC):
-    @abstractmethod
-    def set_initial_response(self, mesh, y):
-        pass
-
-    @abstractmethod
-    def adjust_fluxes(self, mesh, fluxes):
-        pass
-
-    @abstractmethod
-    def adjust_dxdt(self, mesh, dxdt):
-        pass
-
 class ProfileFunction(Protocol):
     def __call__(self, z: np.ndarray) -> np.ndarray:
         '''
@@ -321,10 +308,11 @@ class MeshBase(ABC):
         self.dims = dims
         self.N = N
         self.z = np.zeros((N, dims))
+        self.profile = ProfileBuilder()
 
-    def build_response_profile(self, profile_builder, bcs = None):
+    def build_response_profile(self):
         y = np.zeros((self.N, self.num_responses))
-        for step, response_vars in profile_builder.build_steps:
+        for step, response_vars in self.profile.build_steps:
             y_step = np.atleast_2d(step(self.z))
             if y_step.shape[0] == 1:
                 y_step = y_step.T
@@ -332,9 +320,6 @@ class MeshBase(ABC):
             for i, rv in enumerate(response_vars):
                 index = _get_response_index(rv, self.responses)
                 y[:,index] += y_step[:,i]
-
-        if bcs is not None:
-            bcs.set_initial_response(self, y)
 
         return y
 

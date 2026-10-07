@@ -407,5 +407,3 @@ def plot_2d_fluxes(state: DiffusionState, model: DiffusionModel, element, direct
     ax.set_xlabel(f'Distance x*{z_scale[0]:.0e} (m)')
     ax.set_ylabel(f'Distance y*{z_scale[1]:.0e} (m)')
     return ax, cm
-
-

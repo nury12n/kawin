@@ -8,7 +8,7 @@ from pycalphad import variables as v
 from kawin.state_process import ModelState, DifferentialEquationProcess
 from kawin.thermo.thermodynamics import Thermodynamics, ThermodynamicFunction, enumerate_conditions
 from kawin.thermo.mobility import x_to_u_frac, expand_x_frac, u_to_x_frac, expand_u_frac, interstitials
-from kawin.diffusion.mesh.mesh_base import MeshBase, ProfileBuilder, BoundaryCondition, DiffusionPair
+from kawin.diffusion.mesh.mesh_base import MeshBase, DiffusionPair
 
 # TODO: can we decare MobilityFunction and InterdiffusivityFunction as
 # a function only of conditions. Ideally, I want the diffusion models to
@@ -18,10 +18,6 @@ class DiffusionState(ModelState):
     def __init__(self):
         super().__init__()
         self.u = None
-
-    def x(self, all_elements):
-        u_ext = expand_u_frac(self.u, all_elements, interstitials)
-        return u_to_x_frac(u_ext, all_elements, interstitials)
 
 class DiffusionModel(DifferentialEquationProcess):
     def __init__(self, mesh: MeshBase, elements: list[str], min_composition: float = 1e-8):
@@ -40,10 +36,10 @@ class DiffusionModel(DifferentialEquationProcess):
     def compute_max_dt(self, state: DiffusionState, dxdt: np.ndarray) -> float:
         pass
 
-    def initialize_state(self, profile_builder: ProfileBuilder, bcs: BoundaryCondition = None, state: DiffusionState = None):
+    def initialize_state(self, state: DiffusionState = None):
         if state is None:
             state = DiffusionState()
-        state.u = self.mesh.build_response_profile(profile_builder, bcs)
+        state.u = self.mesh.build_response_profile()
         usum = np.sum(state.u, axis=1)
         if np.any(usum < 0) or np.any(usum > 1):
             raise Exception('Some compositions sum up to below 0 or above 1')

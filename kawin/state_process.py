@@ -8,6 +8,29 @@ class ModelState:
     def __init__(self):
         self.time: float = 0
 
+class StateHistory:
+    def __init__(self, state: ModelState):
+        self.n = 0
+        for key, val in state.__dict__.items():
+            __setattr__(key, np.array(val)[np.newaxis,...])
+
+    def record(self, state: ModelState):
+        self.n += 1
+        for key, val in state.__dict__.items():
+            __setattr__(key, np.concatenate([__getattr__(key), np.array(val)[np.newaxis,...]]))
+
+    def index(self, idx):
+        if idx >= self.n:
+            print('idx > n, setting idx to n')
+            idx = self.n
+        if idx < 0:
+            print('idx < 0, setting idx to 0')
+            idx = 0
+        state = ModelState()
+        for key, val in self.__dict__.items():
+            state.__setattr__(key, val[idx,...])
+        return state
+
 class ModelProcess(ABC):
     @abstractmethod
     def get_next_time(self, state: ModelState) -> float:
@@ -36,6 +59,11 @@ class ApplyDerivativeFunction(Protocol):
         ...
 
 class Iterator(Protocol):
+    """
+    Protocol for iterating a differential equation
+    dxdt_0 is the derivative computed from the Solver at time t
+    It is the same output as compute_dxdt but is added to avoid redundant calculation
+    """
     def __call__(
             self, state: ModelState,
             compute_dxdt: ComputeDerivativeFunction, apply_dxdt: ApplyDerivativeFunction,
@@ -79,6 +107,9 @@ class Iterator(Protocol):
         apply_dxdt(state, k4, dt/6)
 
 class DifferentialEquationProcess(ModelProcess):
+    """
+    TODO: does this implementation only make sense for explicit schemes?
+    """
     def __init__(self, iterator: Iterator = Iterator.explicit_euler):
         self.dxdt = None
         self.dt = None
