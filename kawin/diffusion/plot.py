@@ -281,9 +281,8 @@ def plot_2d(state: DiffusionState, model: DiffusionModel, element, z_scale=1, ax
     y_full = expand_u_frac(state.u, model.all_elements, model.ref_element, interstitials)
     if not plot_ufrac:
         y_full = u_to_x_frac(y_full, model.all_elements, interstitials)
-    # Reshape composition to mesh shape (Cartesian2D.unflattenResponse will give (Nx, Ny, 1))
+    # Reshape composition to mesh shape
     y = np.reshape(y_full[:,model.all_elements.index(element)], (mesh.Nx, mesh.Ny))
-    #y = mesh.unflattenResponse(y_full[:,model.all_elements.index(element)], 1)[...,0]
 
     # plot element
     # TODO: there should be a way to do contour and contourf (maybe separate plot functions?)
@@ -337,8 +336,7 @@ def plot_2d_phases(state: DiffusionState, model: DiffusionModel, phase, z_scale=
     for md in mob_data:
         pf.append(np.sum(md.phase_fractions[md.phases==phase]))
 
-    # Reshape phase fraction to mesh shape (Cartesian2D.unflattenResponse will give (Nx, Ny, 1))
-    #pf = mesh.unflattenResponse(np.array(pf), 1)[...,0]
+    # Reshape phase fraction to mesh shape
     pf = np.reshape(pf, (mesh.Nx, mesh.Ny))
     plot_kwargs = _adjust_kwargs(phase, {'vmin': 0, 'vmax': 1}, kwargs)
     cm = ax.pcolormesh(mesh.z_mesh[...,0]/z_scale[0], mesh.z_mesh[...,1]/z_scale[1], pf, *args, **plot_kwargs)

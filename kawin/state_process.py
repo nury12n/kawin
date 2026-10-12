@@ -33,6 +33,10 @@ class StateHistory:
 
 class ModelProcess(ABC):
     @abstractmethod
+    def initialize_state(self, state: ModelState = None) -> ModelState:
+        pass
+
+    @abstractmethod
     def get_next_time(self, state: ModelState) -> float:
         pass
 
