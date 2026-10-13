@@ -25,7 +25,7 @@ from kawin.constants import AVOGADROS_NUMBER
 def vectorize_gb_factors(func):
     @wraps(func)
     def wrapper(self, gamma, gb_energy):
-        f = lambda gamma, gb=gb_energy: func(self, gamma, gb)
+        f = lambda gamma: func(self, gamma, gb_energy)
         return np.squeeze(np.vectorize(f, otypes=[np.float32])(gamma))
     return wrapper
 
@@ -67,14 +67,6 @@ class NucleationDescription(ABC):
         Factor to multiply by r to get radius of eliminated GB area
         """
         return np.sqrt(self.gb_removal(gamma, gb_energy)/np.pi)
-
-    @abstractmethod
-    def compute_rcrit(self, dg: float, gamma: float, gb_energy: float = 0.3) -> float:
-        pass
-
-    @abstractmethod
-    def compute_gcrit(self, dg: float, gamma: float, gb_energy: float = 0.3) -> float:
-        pass
 
     @staticmethod
     def compute_gbk(gamma: float, gb_energy: float = 0.3) -> float:

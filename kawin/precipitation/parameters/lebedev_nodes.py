@@ -3,7 +3,7 @@ import numpy as np
 '''
 Lebedev quadrature nodes for oder 53, 83 and 131
 
-NOTE: The nodes and weights are currently stored as variables for ease with packaging, 
+NOTE: The nodes and weights are currently stored as variables for ease with packaging,
     but can be moved to text values for clarity
 
     To make it easier to generate the entire set of nodes and weights, they are separated by theta values
@@ -253,7 +253,7 @@ q131 = [('A1', 9.735347946e-06), ('A2', 0.00019075812418), ('A3', 0.000190105954
     ('D', 0.000190553449873, [0.043090374834379094, 1.5311012100198818, 0.8264346362389648], [0.7448244839219743, 0.8268273262435484, 1.541592714558998]) \
 ]
 
-def loadPoints(order):
+def load_points(order):
     '''
     Load lebedov nodes of specific order
 
@@ -271,8 +271,10 @@ def loadPoints(order):
         node = q53
     elif order == 83:
         node = q83
-    else:
+    elif order == 131:
         node = q131
+    else:
+        raise ValueError("order must be 53, 83 or 131")
 
     phi = []
     theta = []
@@ -372,4 +374,4 @@ def loadPoints(order):
     return phi, theta, weights
 
 
-            
+
