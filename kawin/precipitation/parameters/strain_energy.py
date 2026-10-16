@@ -608,12 +608,15 @@ def vectorize_aspect_ratio_solver(func):
         return np.squeeze(np.vectorize(f, otypes=[np.float32])(rsph))
     return wrapper
 
-class AspectRatioSolver(ABC):
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        if 'compute' in cls.__dict__:
-            cls.compute = vectorize_aspect_ratio_solver(cls.__dict__['compute'])
+class ConstantAspectRatio:
+    def __init__(self, aspect_ratio = 1):
+        self.aspect_ratio = aspect_ratio
 
+    @vectorize_aspect_ratio_solver
+    def __call__(self, rsph: float, gamma: float) -> float:
+        return self.aspect_ratio
+
+class AspectRatioSolver(ABC):
     def __init__(self, strain: StrainEnergyDescription, params: MatrixElasticParameters, shape: ShapeDescription):
         self.strain = strain
         self.params = params
@@ -622,6 +625,10 @@ class AspectRatioSolver(ABC):
     @abstractmethod
     def compute(self, rsph, gamma):
         ...
+
+    @vectorize_aspect_ratio_solver
+    def __call__(self, rsph: float, gamma: float) -> float:
+        return self.compute(rsph, gamma)
 
 class GoldenRatioSearchAspectRatio(AspectRatioSolver):
     def __init__(self, strain: StrainEnergyDescription, params: MatrixElasticParameters, shape: ShapeDescription, ar_min = 1.00001, amax = 100):

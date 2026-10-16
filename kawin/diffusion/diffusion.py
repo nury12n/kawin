@@ -25,6 +25,8 @@ class DiffusionState(ModelState):
     u_frac: np.ndarray
 
 class DiffusionModel(DifferentialEquationProcess):
+    state_definition = DiffusionState
+
     def __init__(self, mesh: MeshBase, elements: list[str], min_composition: float = 1e-8):
         super().__init__()
         self.mesh = mesh

@@ -311,10 +311,12 @@ class Thermodynamics:
         self.parameters: dict[str, float] = parameters
 
         # models
+        # TODO: is there a better way to initialize these variables
         self.is_ordered_phase = {p: False for p in precipitates}
         outputs = _build_thermo_models(self.dbf, self.elements, self.matrix, self.precipitates, self.state_variables, self.is_ordered_phase, self.parameters)
         self.models: dict[str, Model] = outputs['models']
         self.phase_record_factory: PhaseRecordFactory = outputs['phase_record_factory']
+
         outputs = _build_mobility_models(self.dbf, self.elements, self.phases, self.state_variables, self.phase_record_factory, self.parameters)
         self.mobility_models: dict[str, mob_funcs.MobilityModel] = outputs['mobility_models']
         self.mobility_callables: dict[str, dict[str, callable]] = outputs['mobility_callables']

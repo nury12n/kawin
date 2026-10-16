@@ -68,6 +68,11 @@ class NucleationDescription(ABC):
         """
         return np.sqrt(self.gb_removal(gamma, gb_energy)/np.pi)
 
+    @property
+    @abstractmethod
+    def is_grain_boundary(self):
+        pass
+
     @staticmethod
     def compute_gbk(gamma: float, gb_energy: float = 0.3) -> float:
         if gamma == 0:
@@ -87,32 +92,50 @@ class BulkDescription(NucleationDescription):
     def area_removal(self, dg: float, gamma: float, gb_energy: float = 0.3):
         return 1
 
+    @property
+    def is_grain_boundary(self):
+        return False
+
 class DislocationDescription(BulkDescription):
     pass
 
-class GrainBoundaryDescription(NucleationDescription):
-    MAX_RATIO = 1
+class GrainDescriptionBase(NucleationDescription):
+    @property
+    @abstractmethod
+    def max_ratio(self):
+        pass
+
+    @property
+    def is_grain_boundary(self):
+        return True
+
+class GrainBoundaryDescription(GrainDescriptionBase):
+    @property
+    def max_ratio(self):
+        return 1
 
     def gb_removal(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
-        if gbk > self.MAX_RATIO:
+        if gbk > self.max_ratio:
             return np.nan
         return np.pi*(1-gbk**2)
 
     def area_factor(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
-        if gbk > self.MAX_RATIO:
+        if gbk > self.max_ratio:
             return np.nan
         return 4*np.pi*(1-gbk)
 
     def volume_factor(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
-        if gbk > self.MAX_RATIO:
+        if gbk > self.max_ratio:
             return np.nan
         return (2*np.pi/3)*(2 - 3*gbk + gbk**3)
 
-class GrainEdgeDescription(NucleationDescription):
-    MAX_RATIO = np.sqrt(3)/2
+class GrainEdgeDescription(GrainDescriptionBase):
+    @property
+    def max_ratio(self):
+        return np.sqrt(3)/2
 
     def alpha(self, gbk):
         return np.arcsin(1/(2*np.sqrt(1-gbk**2)))
@@ -122,14 +145,14 @@ class GrainEdgeDescription(NucleationDescription):
 
     def gb_removal(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
-        if gbk > self.MAX_RATIO:
+        if gbk > self.max_ratio:
             return np.nan
         beta = self.beta(gbk)
         return 3*beta*(1-gbk**2) - gbk*np.sqrt(3-4*gbk**2)
 
     def area_factor(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
-        if gbk > self.MAX_RATIO:
+        if gbk > self.max_ratio:
             return np.nan
         alpha = self.alpha(gbk)
         beta = self.beta(gbk)
@@ -137,14 +160,16 @@ class GrainEdgeDescription(NucleationDescription):
 
     def volume_factor(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
-        if gbk > self.MAX_RATIO:
+        if gbk > self.max_ratio:
             return np.nan
         alpha = self.alpha(gbk)
         beta = self.beta(gbk)
         return 2*(np.pi - 2*alpha + (gbk**2/3)*np.sqrt(3-4*gbk**2) - beta*gbk*(3-gbk**2))
 
-class GrainCornerDescription(NucleationDescription):
-    MAX_RATIO = np.sqrt(2/3)
+class GrainCornerDescription(GrainDescriptionBase):
+    @property
+    def max_ratio(self):
+        return np.sqrt(2/3)
 
     def K(self, gbk):
         return (4/3)*np.sqrt(3/2 - 2*gbk**2) - 2*gbk/3
@@ -159,7 +184,7 @@ class GrainCornerDescription(NucleationDescription):
 
     def gb_removal(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
-        if gbk > self.MAX_RATIO:
+        if gbk > self.max_ratio:
             return np.nan
         K = self.K(gbk)
         phi = self.phi(gbk)
@@ -167,7 +192,7 @@ class GrainCornerDescription(NucleationDescription):
 
     def area_factor(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
-        if gbk > self.MAX_RATIO:
+        if gbk > self.max_ratio:
             return np.nan
         phi = self.phi(gbk)
         delta = self.delta(gbk)
@@ -175,7 +200,7 @@ class GrainCornerDescription(NucleationDescription):
 
     def volume_factor(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
-        if gbk > self.MAX_RATIO:
+        if gbk > self.max_ratio:
             return np.nan
         K = self.K(gbk)
         phi = self.phi(gbk)
@@ -184,6 +209,7 @@ class GrainCornerDescription(NucleationDescription):
 
 def nucleation_rcrit(nuc_desc: NucleationDescription, dg: float, gamma: float, gb_energy: float = 0.3) -> float:
     """
+    Note: gb is volumetric driving force (J/m3), not chemical driving force (J/mol)
     Critical radius of nucleation
     This is only really needed for GB nucleation since bulk and dislocation nucleation
     should account for the shape factors
@@ -199,6 +225,7 @@ def nucleation_rcrit(nuc_desc: NucleationDescription, dg: float, gamma: float, g
 
 def nucleation_gcrit(nuc_desc: NucleationDescription, dg: float, gamma: float, gb_energy: float = 0.3) -> float:
     """
+    Note: gb is volumetric driving force (J/m3), not chemical driving force (J/mol)
     Critical driving force for nucleation
 
     G* = 4/27 * (b*\gamma_{\alpha \alpha} - a*\gamma_{\alpha \beta}) / (c*dg)**2
@@ -212,6 +239,7 @@ def nucleation_gcrit(nuc_desc: NucleationDescription, dg: float, gamma: float, g
 
 def nucleation_gcrit_from_rcrit(nuc_desc: NucleationDescription, dg: float, rcrit: float, gamma: float, gb_energy: float = 0.3) -> float:
     """
+    Note: gb is volumetric driving force (J/m3), not chemical driving force (J/mol)
     Gcrit computed in terms of rcrit. This is for cases where we place limits on rcrit so we
     cannot compute Gcrit directly
     G* = -R*^2 * (b*\gamma_{\alpha \alpha} - a*\gamma_{\alpha \beta} + c*dg*(R*))
@@ -233,7 +261,7 @@ class NucleationSites:
         return NucleationSites.site_density(vm, 3)
 
     @staticmethod
-    def build_n0_from_composition(x0: float, vm: float):
+    def bulk_n0_from_composition(x0: float, vm: float):
         return np.amin(x0)*NucleationSites.site_density(vm, 3)
 
     @staticmethod

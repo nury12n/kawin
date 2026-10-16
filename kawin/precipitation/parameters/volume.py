@@ -1,6 +1,6 @@
 import numpy as np
 
-from kawin.Constants import AVOGADROS_NUMBER
+from kawin.constants import AVOGADROS_NUMBER
 
 class Volume:
     def __init__(self, a: float = 0, va: float = 0, vm: float = 0, atoms_per_cell: int = 0):

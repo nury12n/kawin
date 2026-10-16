@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, asdict
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Protocol, Self
 from functools import wraps
 import copy
 
@@ -20,34 +20,64 @@ class ModelState:
     So model states do not actually need to subclass this as long as it defines
     the "time" attribute.
 
-    to_data, from_data and interpolate is for the Recorder
-      to_data must output to a dictionary of numpy arrays
-      from_data must create a valid state from a dictionary of numpy arrays
-      interpolate must create a valid state by interpolating between two states
-
-      With this, the state itself does not need to abide to any type of structure
-      as long as it is able to convert itself to the necessary data types for
-      the Recorder.
+    to_data, from_data, create_dataset, append_to_dataset,
+    get_dataset_slice and interpolate is for the Recorder
+      For use in the Recorder, the state and data representation does nto need
+      to follow any structure as long as these functions are properly defined
 
       These functions do not need to be overridden in the following conditions
       - the Recorder is not used
-      - all attributes defined in the state can be trivially converted to a numpy array
+      - or all attributes defined in the state can be
+        - trivially converted to a numpy array
+        - attributes that are Sequences are of fixed length
+        - attributes can be interpolated by (1-alpha)*a + alpha*b
     """
     time: float
 
     @staticmethod
-    def to_data(state):
+    def to_data(state: Self) -> any:
+        """
+        Defines how a state should be represented as raw data
+        Any format is okay for the data representation given that:
+          - We can convert the data back to the state
+          - We can define how a list of data will be represented
+        """
         return {key: np.array(val) for key, val in state.__dict__.items()}
 
     @staticmethod
-    def from_data(data):
+    def from_data(data: any) -> Self:
+        """Converts data representation to a state"""
         state = ModelState(time=0)
         for key, val in data.items():
             setattr(state, key, np.array(val))
         return state
 
     @staticmethod
-    def interpolate(a, b, time):
+    def create_dataset() -> any:
+        """Defines how a list of data should be defined"""
+        return dict()
+
+    @staticmethod
+    def append_to_dataset(dataset: any, data: any):
+        """Defines how a state's data representation should be appended to the dataset"""
+        if len(dataset) == 0:
+            for key, val in data.items():
+                dataset[key] = np.array(val)[np.newaxis,...]
+        else:
+            for key, val in data.items():
+                dataset[key] = np.concatenate([dataset[key], np.array(val)[np.newaxis,...]])
+
+    @staticmethod
+    def get_dataset_slice(dataset: any, idx: int) -> any:
+        """
+        Defines how a dataset is indexed to return a data representation
+        This is not responsible for converting the data to a state, from_data should be called to do that instead
+        """
+        return {key: val[idx,...] for key, val in dataset.items()}
+
+    @staticmethod
+    def interpolate(a: Self, b: Self, time: float) -> Self:
+        """Defines how to interpolation between two states"""
         alpha = (time-a.time)/(b.time-a.time)
         state = ModelState(time=time)
         for key in a.__dict__.keys():
@@ -55,6 +85,8 @@ class ModelState:
         return state
 
 class ModelProcess(ABC):
+    state_definition = ModelState
+
     def initialize_state(self, state: ModelState = None):
         if state is None:
             state = ModelState(time=0)
@@ -76,6 +108,57 @@ class ModelProcess(ABC):
     @abstractmethod
     def finalize(self, state: ModelState):
         pass
+
+class Recorder:
+    """
+    Handles recording of states
+    """
+    def __init__(self, model: ModelProcess):
+        self.state_def = model.state_definition
+        # we store our copy of times since we don't know how dataset is implemented
+        self.times = np.array([])
+        self.dataset = self.state_def.create_dataset()
+
+    @property
+    def n(self):
+        return len(self.times)
+
+    def record(self, state: ModelState):
+        self.state_def.append_to_dataset(self.dataset, self.state_def.to_data(state))
+        self.times = np.concatenate([self.times, [state.time]])
+
+    def __getitem__(self, idx: int) -> ModelState:
+        # TODO: should we support slicing? Would that return an instance of Recorder
+        #       or a slice of dataset. The single idx returns a State however, so I
+        #       don't want to be returning different objects
+        # TODO: should we silently clamp idx? Or should this raise an error, where we
+        #       would have a second indexing function that does the clamping?
+        if idx >= self.n:
+            print('idx > n, setting idx to n')
+            idx = self.n
+        if idx < 0:
+            print('idx < 0, setting idx to 0')
+            idx = 0
+        return self.state_def.from_data(self.state_def.get_dataset_slice(self.dataset, idx))
+
+    def __setitem__(self, idx: int, value: any):
+        raise ValueError(f"'{self.__class__.__name__}' is read-only")
+
+    def __delitem__(self, idx: int):
+        raise ValueError(f"'{self.__class__.__name__}' is read-only")
+
+    def get_state(self, time: float) -> ModelState:
+        if time < self.times[0]:
+            t0 = self.times[0]
+            print(f'Time < initial time, setting time to {t0}')
+            return self.index(0)
+        elif time > self.times[self.n-1]:
+            tf = self.times[self.n-1]
+            print(f'Time > last recorded time, setting time to {tf}')
+            return self.index(self.n-1)
+
+        idx = np.where(time >= self.times)[0][-1]
+        return self.state_def.interpolate(self[idx], self[idx+1], time)
 
 class DifferentialEquationProcess(ModelProcess):
     """
@@ -186,46 +269,3 @@ class Solver:
                 print(i, state.time)
             Solver.iterate(state, process, t_final)
             i += 1
-
-class Recorder:
-    def __init__(self, state: ModelState):
-        self.n = 0
-        self.state_obj = state
-        self.data = {}
-
-    def record(self, state: ModelState):
-        self.n += 1
-        data = self.state_obj.to_data(state)
-        if len(self.data) == 0:
-            for key, val in data.items():
-                self.data[key] = np.array(val)[np.newaxis,...]
-        else:
-            for key, val in data.items():
-                self.data[key] = np.concatenate([self.data[key], np.array(val)[np.newaxis,...]])
-
-    def index(self, idx: int) -> ModelState:
-        if idx >= self.n:
-            print('idx > n, setting idx to n')
-            idx = self.n
-        if idx < 0:
-            print('idx < 0, setting idx to 0')
-            idx = 0
-        sliced_data = {}
-        for key, val in self.data.items():
-            sliced_data[key] = val[idx,...]
-        return self.state_obj.from_data(sliced_data)
-
-    def get_state(self, time: float) -> ModelState:
-        if time > self.data["time"][self.n-1]:
-            tf = self.data["time"][self.n-1]
-            print(f'Time > last recorded time, setting time to {tf}')
-            return self.index(self.n-1)
-        if time < self.data["time"][0]:
-            t0 = self.data["time"][0]
-            print(f'Time < initial time, setting time to {t0}')
-            return self.index(0)
-
-        idx = np.where(time>=self.data["time"])[0][-1]
-        s1 = self.index(idx)
-        s2 = self.index(idx+1)
-        return self.state_obj.interpolate(s1, s2, time)
