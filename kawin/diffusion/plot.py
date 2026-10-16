@@ -54,7 +54,7 @@ def plot_1d(state: DiffusionState, model: DiffusionModel, elements=None, z_scale
         elements = [elements]
 
     # Convert y to full composition space and convert to composition if plotting
-    y_full = expand_u_frac(state.u, model.all_elements, model.ref_element, interstitials)
+    y_full = expand_u_frac(state.u_frac, model.all_elements, model.ref_element, interstitials)
     if not plot_ufrac:
         y_full = u_to_x_frac(y_full, model.all_elements, interstitials)
     for e in elements:
@@ -110,7 +110,7 @@ def plot_1d_two_axis(state: DiffusionState, model: DiffusionModel, left_elements
         right_elements = [right_elements]
 
     # Convert y to full composition space and convert to composition if plotting
-    y_full = expand_u_frac(state.u, model.all_elements, model.ref_element, interstitials)
+    y_full = expand_u_frac(state.u_frac, model.all_elements, model.ref_element, interstitials)
     if not plot_ufrac:
         y_full = u_to_x_frac(y_full, model.all_elements, interstitials)
 
@@ -166,7 +166,7 @@ def plot_1d_phases(state: DiffusionState, model: DiffusionModel, phases=None, z_
     mesh = _get_1d_mesh(model)
 
     # Compute phase fraction
-    x_full = expand_u_frac(state.u, model.all_elements, model.ref_element, interstitials)
+    x_full = expand_u_frac(state.u_frac, model.all_elements, model.ref_element, interstitials)
     x_full = u_to_x_frac(x_full, model.all_elements, interstitials)[:,1:]
     y_diff, z_diff = model.mesh.get_diffusivity_coordinates(x_full)
     conditions = {v.X(e): y_diff[:,model.elements.index(e)] for e in model.elements}
@@ -278,7 +278,7 @@ def plot_2d(state: DiffusionState, model: DiffusionModel, element, z_scale=1, ax
     if z_scale.shape[0] == 1:
         z_scale = z_scale[0]*np.ones(2)
 
-    y_full = expand_u_frac(state.u, model.all_elements, model.ref_element, interstitials)
+    y_full = expand_u_frac(state.u_frac, model.all_elements, model.ref_element, interstitials)
     if not plot_ufrac:
         y_full = u_to_x_frac(y_full, model.all_elements, interstitials)
     # Reshape composition to mesh shape
@@ -324,7 +324,7 @@ def plot_2d_phases(state: DiffusionState, model: DiffusionModel, phase, z_scale=
     if z_scale.shape[0] == 1:
         z_scale = z_scale[0]*np.ones(2)
 
-    x_full = expand_u_frac(state.u, model.all_elements, model.ref_element, interstitials)
+    x_full = expand_u_frac(state.u_frac, model.all_elements, model.ref_element, interstitials)
     x_full = u_to_x_frac(x_full, model.all_elements, interstitials)[:,1:]
     y_diff, z_diff = model.mesh.get_diffusivity_coordinates(x_full)
     conditions = {v.X(e): y_diff[:,model.elements.index(e)] for e in model.elements}

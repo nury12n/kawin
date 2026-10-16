@@ -357,7 +357,7 @@ class HomogenizationModel(DiffusionModel):
         '''
         # x is shape (N,e), so convert to mesh shape to obtain diffusion/response coordinates
         # TODO: this feels inefficient to convert u->x for mobility, then back to u for flux calculation
-        u = expand_u_frac(state.u, self.all_elements, self.ref_element, interstitials)
+        u = expand_u_frac(state.u_frac, self.all_elements, self.ref_element, interstitials)
         x = u_to_x_frac(u, self.all_elements, interstitials)[:,1:]
 
         y_res, z_res = self.mesh.get_response_coordinates(x)

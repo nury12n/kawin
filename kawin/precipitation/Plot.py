@@ -7,29 +7,29 @@ from kawin.precipitation.PopulationBalance import PopulationBalanceModel, plotPD
 from kawin.precipitation import PrecipitateBase, PrecipitateModel
 
 def _get_time_axis(time, timeUnits='s', bounds=None):
-        '''
-        Returns scaling factor, label and x-limits depending on units of time
+    '''
+    Returns scaling factor, label and x-limits depending on units of time
 
-        Parameters
-        ----------
-        timeUnits : str
-            's' / 'sec' / 'seconds' - seconds
-            'min' / 'minutes' - minutes
-            'h' / 'hrs' / 'hours' - hours
-        '''
-        timeScale = 1
-        timeLabel = 'Time (s)'
-        if 'min' in timeUnits:
-            timeScale = 1/60
-            timeLabel = 'Time (min)'
-        if 'h' in timeUnits:
-            timeScale = 1/3600
-            timeLabel = 'Time (hrs)'
+    Parameters
+    ----------
+    timeUnits : str
+        's' / 'sec' / 'seconds' - seconds
+        'min' / 'minutes' - minutes
+        'h' / 'hrs' / 'hours' - hours
+    '''
+    timeScale = 1
+    timeLabel = 'Time (s)'
+    if 'min' in timeUnits:
+        timeScale = 1/60
+        timeLabel = 'Time (min)'
+    if 'h' in timeUnits:
+        timeScale = 1/3600
+        timeLabel = 'Time (hrs)'
 
-        if bounds is None:
-            bounds = [timeScale*1e-5*time[-1], timeScale * time[-1]]
+    if bounds is None:
+        bounds = [timeScale*1e-5*time[-1], timeScale * time[-1]]
 
-        return timeScale, timeLabel, bounds
+    return timeScale, timeLabel, bounds
 
 def _total_sum(model: PrecipitateBase, plotVar):
     '''

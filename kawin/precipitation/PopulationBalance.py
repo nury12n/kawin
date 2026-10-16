@@ -1,9 +1,146 @@
 import copy
 from pathlib import Path
+from abc import ABC, abstractmethod
 import numpy as np
 import matplotlib.pyplot as plt
 
 from kawin.plot_utils import _get_axis, _adjust_kwargs
+
+class PSDState:
+    def __init__(self, cmin, cmax, bins):
+        self.edges = np.linspace(cmin, cmax, bins+1)
+        self.sizes = 0.5*(self.edges[1:] + self.edges[:-1])
+        self.psd = np.zeros(bins)
+
+    @classmethod
+    def from_distribution(cls, data, bins=None):
+        psd, edges = np.histogram(data, bins)
+        obj = cls(edges[0], edges[-1], len(edges-1))
+        obj.psd = psd
+        return obj
+
+    @staticmethod
+    def moment(state: PSDState, order, weights=None):
+        if weights is None:
+            return np.sum(state.psd*state.sizes**order)
+        else:
+            return np.sum(weights*state.psd*state.sizes**order)
+
+    @staticmethod
+    def cumulative_moment(state: PSDState, order, weights=None):
+        if weights is None:
+            return np.cumsum(state.psd*state.sizes**order)
+        else:
+            return np.cumsum(weights*state.psd*state.sizes**order)
+
+    @staticmethod
+    def zero_moment(state: PSDState, weights=None):
+        return moment(state, 0, weights)
+
+    @staticmethod
+    def first_moment(state: PSDState, weights=None):
+        return moment(state, 1, weights)
+
+    @staticmethod
+    def second_moment(state: PSDState, weights=None):
+        return moment(state, 2, weights)
+
+    @staticmethod
+    def third_moment(state: PSDState, weights=None):
+        return moment(state, 3, weights)
+
+# Loosely follows a DifferentialEquationProcess,
+# but we compute dxdt from an external process rather than the state by itself
+# one of the goals here is that the KWN model should be agnostic to a Eulerian or Lagrangian implementation
+# so ideally, in a multiphase system, we should allow for one phase to be handled by a Eulerian PBM
+# and another be handled by a Lagrangian PBM
+class PBMModel(ABC):
+    @abstractmethod
+    def compute_dxdt(self, state: PSDState, drdt: any, nuc_rate: float, nuc_radius: float) -> any:
+        ...
+
+    @abstractmethod
+    def compute_max_dt(self, state: PSDState, drdt: any, nuc_rate: float, nuc_radius: float) -> any:
+        ...
+
+    @abstractmethod
+    def apply_dxdt(self, state: PSDState, dxdt: any, dt: float):
+        ...
+
+    @abstractmethod
+    def finalize(self, state: PSDState):
+        ...
+
+class EulerPBM:
+    def __init__(self, cmin=1e-10, cmax=1e-9, bins=150, min_bins=100, max_bins=200, eps = 1, max_dissolution = 1e-3):
+        self.cmin_orig = cmin
+        self.cmax_orig = cmax
+        self.bins = bins
+        self.min_bins = min_bins
+        self.max_bins = max_bins
+        self.eps = eps
+        self.max_dissolution = max_dissolution
+
+    def initialize_state(self, state: PSDState = None) -> PSDState:
+        if state is None:
+            state = PSDState(self.cmin_orig, self.cmax_orig, self.bins)
+        return state
+
+    def compute_dxdt(self, state: PSDState, drdt: any, nuc_rate: float, nuc_radius: float) -> any:
+        s = np.sign(drdt)
+        s[s == -1] = 0
+        dr = state.edges[1:] - state.edges[:-1]
+        flux = np.zeros(len(state.psd)+1)
+        flux = drdt[:-1]*state.psd*(1-s[:-1])/dr
+        flux = drdt[1:]*state.psd*s[1:]/dr
+
+        dxdt = flux[:-1] - flux[1:]
+
+        idx = np.argmax(psd.edges > nuc_radius) - 1
+        dxdt[idx] += nuc_rate
+        return dxdt
+
+    def compute_max_dt(self, state: PSDState, drdt: any, nuc_rate: float, nuc_radius: float) -> any:
+        ...
+
+    def apply_dxdt(self, state: PSDState, dxdt: any, dt: float):
+        # TODO: we'll need to correct dxdt here if there's an updated dt
+        state.psd += dxdt*dt
+        state.psd[state.psd < self.eps] = 0
+
+    def finalize(self, state: PSDState):
+        ...
+
+    def change_bins(self, state: PSDState, bins: int):
+        vol_old = PSDState.moment(state, 3)
+        rho = state.psd / (state.edges[1:] - state.edges[:-1])
+        r_old = state.sizes
+        state.edges = np.linspace(state.edges[0], state.edges[1], bins)
+        state.sizes = 0.5*(state.edges[1:] + state.edges[:-1])
+        state.psd = np.interp(state.sizes, r_old, rho)*(state.edges[1:] - state.edges[:-1])
+        vol_new = PSDState.moment(state, 3)
+        if vol_new != 0:
+            state.psd *= vol_old / vol_new
+        else:
+            state.psd[:] = 0
+
+    def add_size_classes(self, state: PSDState, bins: int):
+        idx = len(state.psd)-1
+        state.psd = np.append(state.psd, np.zeros(bins))
+        state.edges = np.append(state.edges, np.zeros(bins))
+        state.sizes = np.append(state.sizes, np.zeros(bins))
+        max_edge = bins*(state.edges[1] - state.edges[0])
+        state.edges[idx:] = np.linspace(state.edges[-1], max_edge, bins)
+        state.sizes[idx:] = 0.5*(state.edges[idx:-1]+state.edges[:idx+1:])
+
+    def adjust_size_classes(state: PSDState):
+        ...
+
+    def dissolution_index(self, state: PSDState):
+        c = PSDState.cumulative_moment(state, 3)
+        frac = self.max_dissolution * c[-1]
+        idx = np.argmax(c > frac) - 1
+        return np.amax([idx, 0])
 
 class PopulationBalanceModel:
     '''

@@ -1,5 +1,6 @@
 from typing import Protocol
 from abc import abstractmethod
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -14,10 +15,14 @@ from kawin.diffusion.mesh.mesh_base import MeshBase, DiffusionPair
 # a function only of conditions. Ideally, I want the diffusion models to
 # be independent of Thermodynamics.
 
+# class DiffusionState(ModelState):
+#     def __init__(self):
+#         super().__init__()
+#         self.u = None
+
+@dataclass
 class DiffusionState(ModelState):
-    def __init__(self):
-        super().__init__()
-        self.u = None
+    u_frac: np.ndarray
 
 class DiffusionModel(DifferentialEquationProcess):
     def __init__(self, mesh: MeshBase, elements: list[str], min_composition: float = 1e-8):
@@ -29,33 +34,31 @@ class DiffusionModel(DifferentialEquationProcess):
         self.min_composition = min_composition
 
     @abstractmethod
-    def compute_pairs(self, state: DiffusionState) -> list[DiffusionPair]:
+    def compute_pairs(self, state: DiffusionState, curr_time: float) -> list[DiffusionPair]:
         pass
 
     @abstractmethod
-    def compute_max_dt(self, state: DiffusionState, dxdt: np.ndarray) -> float:
+    def compute_max_dt(self, state: DiffusionState, curr_time: float, dxdt: np.ndarray) -> float:
         pass
 
-    def initialize_state(self, state: DiffusionState = None):
-        if state is None:
-            state = DiffusionState()
-        state.u = self.mesh.build_response_profile()
-        usum = np.sum(state.u, axis=1)
+    def setup_initial_state_data(self, state: DiffusionState):
+        state.u_frac = self.mesh.build_response_profile()
+        usum = np.sum(state.u_frac, axis=1)
         if np.any(usum < 0) or np.any(usum > 1):
             raise Exception('Some compositions sum up to below 0 or above 1')
         scaled_min_comp = len(self.all_elements)*self.min_composition
-        state.u[state.u > scaled_min_comp] = state.u[state.u > scaled_min_comp] - scaled_min_comp
-        state.u[state.u < scaled_min_comp] = self.min_composition
-        u_full = expand_x_frac(state.u, self.all_elements, self.ref_element)
+        state.u_frac[state.u_frac > scaled_min_comp] = state.u_frac[state.u_frac > scaled_min_comp] - scaled_min_comp
+        state.u_frac[state.u_frac < scaled_min_comp] = self.min_composition
+        u_full = expand_x_frac(state.u_frac, self.all_elements, self.ref_element)
         u_full = x_to_u_frac(u_full, self.all_elements, interstitials, return_usum=False)
-        state.u = u_full[:,1:]
+        state.u_frac = u_full[:,1:]
         return state
 
     def compute_dxdt(self, state: DiffusionState) -> np.ndarray:
         return self.mesh.compute_dxdt(self.compute_pairs(state))
 
     def apply_dxdt(self, state: DiffusionState, dxdt: any, dt: float):
-        state.u += dxdt*dt
+        state.u_frac += dxdt*dt
 
     def finalize(self, state: DiffusionState):
         # clamp composition
@@ -64,9 +67,9 @@ class DiffusionModel(DifferentialEquationProcess):
         #   For interstitial   - u-fraction = (0, inf)
         for i, e in enumerate(self.elements):
             if e not in interstitials:
-                state.u[:,i] = np.clip(state.u[:,i], self.min_composition, 1-self.min_composition)
+                state.u_frac[:,i] = np.clip(state.u_frac[:,i], self.min_composition, 1-self.min_composition)
             else:
-                state.u[:,i] = np.clip(state.u[:,i], self.min_composition, None)
+                state.u_frac[:,i] = np.clip(state.u_frac[:,i], self.min_composition, None)
 
 # -- Temperature protocol and some implementations --
 class DiffusionModelTemperature(Protocol):

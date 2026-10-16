@@ -40,6 +40,8 @@ def effective_diffusion_distance(ohm):
     Where Q is the super saturation and lambda is given by
     ohm = 2*lambda^2 - 2*lambda^3 * sqrt(pi) * exp(lambda^2) * erfc(lambda)
 
+    We use a lookup table here for efficiency
+
     Parameters
     ----------
     ohm: supersaturation
@@ -47,13 +49,11 @@ def effective_diffusion_distance(ohm):
     """
     return np.interp(ohm, effective_diffusion_distance.table.ohm, effective_diffusion_distance.table.eff_dist)
 
-def set_effective_diffusion_interpolation(n, lam_min, lam_max):
-    # function attributes just seem weird, but it does what I want, so I'm not asking any questions
-    effective_diffusion_distance.table = EffectiveDiffusionDistanceLookupTable(n, lam_min, lam_max)
-
+# function attributes just seem weird, but it effectively allows for "static" variables in functions
+# this lets us make this function as a standalone without a class implementation
 # values are selected here that give a max error of ~1e-5
-# this is based off sweeping the supersaturation from 0 to 1 at an interval of 1e-5
-set_effective_diffusion_interpolation(n=1000, lam_min=-6, lam_max=1)
+# # this is based off sweeping the supersaturation from 0 to 1 at an interval of 1e-5
+effective_diffusion_distance.table = EffectiveDiffusionDistanceLookupTable(n=1000, lam_min=-6, lam_max=1)
 
 
 # class EffectiveDiffusionFunctions:

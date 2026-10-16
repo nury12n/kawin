@@ -1,39 +1,68 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, asdict
+from collections.abc import Sequence
 from typing import Protocol
+from functools import wraps
 import copy
 
 import numpy as np
 
+from kawin.iterators import Iterator
+
+@dataclass
 class ModelState:
-    def __init__(self):
-        self.time: float = 0
+    """
+    Holds variables pertaining to a state. This should contain all the information needed
+    to tell a model how to progress the state (i.e. the model itself should be stateless)
+        Technically, a model is allowed to hold a state to help with calculations, but
+        should be logically stateless in that the model acts as a statelss object
 
-class StateHistory:
-    def __init__(self, state: ModelState):
-        self.n = 0
-        for key, val in state.__dict__.items():
-            __setattr__(key, np.array(val)[np.newaxis,...])
+    So model states do not actually need to subclass this as long as it defines
+    the "time" attribute.
 
-    def record(self, state: ModelState):
-        self.n += 1
-        for key, val in state.__dict__.items():
-            __setattr__(key, np.concatenate([__getattr__(key), np.array(val)[np.newaxis,...]]))
+    to_data, from_data and interpolate is for the Recorder
+      to_data must output to a dictionary of numpy arrays
+      from_data must create a valid state from a dictionary of numpy arrays
+      interpolate must create a valid state by interpolating between two states
 
-    def index(self, idx):
-        if idx >= self.n:
-            print('idx > n, setting idx to n')
-            idx = self.n
-        if idx < 0:
-            print('idx < 0, setting idx to 0')
-            idx = 0
-        state = ModelState()
-        for key, val in self.__dict__.items():
-            state.__setattr__(key, val[idx,...])
+      With this, the state itself does not need to abide to any type of structure
+      as long as it is able to convert itself to the necessary data types for
+      the Recorder.
+
+      These functions do not need to be overridden in the following conditions
+      - the Recorder is not used
+      - all attributes defined in the state can be trivially converted to a numpy array
+    """
+    time: float
+
+    @staticmethod
+    def to_data(state):
+        return {key: np.array(val) for key, val in state.__dict__.items()}
+
+    @staticmethod
+    def from_data(data):
+        state = ModelState(time=0)
+        for key, val in data.items():
+            setattr(state, key, np.array(val))
+        return state
+
+    @staticmethod
+    def interpolate(a, b, time):
+        alpha = (time-a.time)/(b.time-a.time)
+        state = ModelState(time=time)
+        for key in a.__dict__.keys():
+            setattr(state, key, (1-alpha)*getattr(a, key) + alpha*getattr(b, key))
         return state
 
 class ModelProcess(ABC):
+    def initialize_state(self, state: ModelState = None):
+        if state is None:
+            state = ModelState(time=0)
+            self.setup_initial_state_data(state)
+        return state
+
     @abstractmethod
-    def initialize_state(self, state: ModelState = None) -> ModelState:
+    def setup_initial_state_data(self, state: ModelState) -> ModelState:
         pass
 
     @abstractmethod
@@ -42,73 +71,11 @@ class ModelProcess(ABC):
 
     @abstractmethod
     def progress_state(self, state: ModelState, time: float):
-        """This should not touch state.time. That will be handled in Solver"""
         pass
 
     @abstractmethod
     def finalize(self, state: ModelState):
         pass
-
-class ComputeDerivativeFunction(Protocol):
-    def __call__(self, state: ModelState) -> any:
-        """
-        Structure of dxdt can be anything since ApplyDerivativeFunction
-        handles the relationship between state and dxdt
-        """
-        ...
-
-class ApplyDerivativeFunction(Protocol):
-    def __call__(self, state: ModelState, dxdt: any, dt: float):
-        """Directly modifies state"""
-        ...
-
-class Iterator(Protocol):
-    """
-    Protocol for iterating a differential equation
-    dxdt_0 is the derivative computed from the Solver at time t
-    It is the same output as compute_dxdt but is added to avoid redundant calculation
-    """
-    def __call__(
-            self, state: ModelState,
-            compute_dxdt: ComputeDerivativeFunction, apply_dxdt: ApplyDerivativeFunction,
-            dxdt_0: any, dt: float):
-        ...
-
-    @staticmethod
-    def explicit_euler(
-            state: ModelState,
-            compute_dxdt: ComputeDerivativeFunction, apply_dxdt: ApplyDerivativeFunction,
-            dxdt_0: any, dt: float):
-        apply_dxdt(state, dxdt_0, dt)
-
-    @staticmethod
-    def rk4(
-            state: ModelState,
-            compute_dxdt: ComputeDerivativeFunction, apply_dxdt: ApplyDerivativeFunction,
-            dxdt_0: any, dt: float):
-        # TODO: I don't like invoking deepcopy here, should we have a method in
-        # state to handle copies?
-        k1 = dxdt_0
-        x1 = copy.deepcopy(state)
-        apply_dxdt(x1, k1, dt/2)
-
-        k2 = compute_dxdt(x1)
-        x2 = copy.deepcopy(state)
-        apply_dxdt(x2, k2, dt/2)
-
-        k3 = compute_dxdt(x2)
-        x3 = copy.deepcopy(state)
-        apply_dxdt(x3, k3, dt)
-
-        k4 = compute_dxdt(x3)
-
-        # RK4 is generally shown as f_t+1 = f_t + (k1+2*k2+2*k3+k4)*dt
-        # We split it up here instead to avoid assumptions on whether dxdt can be added together
-        #apply_dxdt(state, (k1+2*k2+2*k3+k4)/6, dt)
-        apply_dxdt(state, k1, dt/6)
-        apply_dxdt(state, k2, dt/3)
-        apply_dxdt(state, k3, dt/3)
-        apply_dxdt(state, k4, dt/6)
 
 class DifferentialEquationProcess(ModelProcess):
     """
@@ -182,23 +149,23 @@ class DiscreteEventProcess(ModelProcess):
         else:
             self.event_generators[self.next_event_id].reset(state)
 
-class MixedProcess(ModelProcess):
-    def __init__(self, processes: list[ModelProcess]):
-        self.processes: list[float] = processes
-        self.p_next: int = -1
+# class MixedProcess(ModelProcess):
+#     def __init__(self, processes: list[ModelProcess]):
+#         self.processes: list[float] = processes
+#         self.p_next: int = -1
 
-    def get_next_time(self, state: ModelState) -> float:
-        times = [p.get_next_time(state) for p in self.processes]
-        t_next = np.amin(times)
-        self.p_next = self.processes[np.argmin(times)]
-        return t_next
+#     def get_next_time(self, state: ModelState) -> float:
+#         times = [p.get_next_time(state) for p in self.processes]
+#         t_next = np.amin(times)
+#         self.p_next = self.processes[np.argmin(times)]
+#         return t_next
 
-    def progress_state(self, state: ModelState, time: float):
-        self.p_next.progress_state(state, time)
+#     def progress_state(self, state: ModelState):
+#         self.p_next.progress_state(state, time)
 
-    def finalize(self, state: ModelState):
-        for p in self.processes:
-            p.finalize(state)
+#     def finalize(self, state: ModelState):
+#         for p in self.processes:
+#             p.finalize(state)
 
 class Solver:
     @staticmethod
@@ -219,3 +186,46 @@ class Solver:
                 print(i, state.time)
             Solver.iterate(state, process, t_final)
             i += 1
+
+class Recorder:
+    def __init__(self, state: ModelState):
+        self.n = 0
+        self.state_obj = state
+        self.data = {}
+
+    def record(self, state: ModelState):
+        self.n += 1
+        data = self.state_obj.to_data(state)
+        if len(self.data) == 0:
+            for key, val in data.items():
+                self.data[key] = np.array(val)[np.newaxis,...]
+        else:
+            for key, val in data.items():
+                self.data[key] = np.concatenate([self.data[key], np.array(val)[np.newaxis,...]])
+
+    def index(self, idx: int) -> ModelState:
+        if idx >= self.n:
+            print('idx > n, setting idx to n')
+            idx = self.n
+        if idx < 0:
+            print('idx < 0, setting idx to 0')
+            idx = 0
+        sliced_data = {}
+        for key, val in self.data.items():
+            sliced_data[key] = val[idx,...]
+        return self.state_obj.from_data(sliced_data)
+
+    def get_state(self, time: float) -> ModelState:
+        if time > self.data["time"][self.n-1]:
+            tf = self.data["time"][self.n-1]
+            print(f'Time > last recorded time, setting time to {tf}')
+            return self.index(self.n-1)
+        if time < self.data["time"][0]:
+            t0 = self.data["time"][0]
+            print(f'Time < initial time, setting time to {t0}')
+            return self.index(0)
+
+        idx = np.where(time>=self.data["time"])[0][-1]
+        s1 = self.index(idx)
+        s2 = self.index(idx+1)
+        return self.state_obj.interpolate(s1, s2, time)

@@ -40,7 +40,7 @@ class SinglePhaseModel(DiffusionModel):
         self.von_neumann_threshold = 0.4
 
     def compute_pairs(self, state: DiffusionState) -> list[DiffusionPair]:
-        u = expand_u_frac(state.u, self.all_elements, self.ref_element, interstitials)
+        u = expand_u_frac(state.u_frac, self.all_elements, self.ref_element, interstitials)
         x = u_to_x_frac(u, self.all_elements, interstitials)[:,1:]
 
         y_res, z_res = self.mesh.get_response_coordinates(x)
