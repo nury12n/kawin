@@ -64,7 +64,7 @@ def compute_interfacial_composition_equilibrium(
     )
 
 @enumerate_conditions(InterfacialCompositionFunction.squeeze)
-def compute_interfacial_composition_curvature(
+def interfacial_composition_curvature_impl(
         therm: Thermodynamics, conditions: dict[v.StateVariable, float|list[float]],
         matrix_phase: str, prec_phase: str, ref_element: str=None, **kwargs) -> InterfacialCompositionOutput:
     """
@@ -144,3 +144,6 @@ def compute_interfacial_composition_curvature(
         x_alpha=np.clip(xm, 0, 1, dtype=np.float64),
         x_beta=np.clip(xp, 0, 1, dtype=np.float64)
     )
+
+def create_compute_interfacial_composition_curvature(ref_element: str) -> InterfacialCompositionFunction:
+    return lambda therm, conds, mat, prec, **kwargs: interfacial_composition_curvature_impl(therm, conds, mat, prec, ref_element, **kwargs)

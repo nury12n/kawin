@@ -520,16 +520,16 @@ class EllipsoidalStrainEnergyBase(StrainEnergyDescription):
     @staticmethod
     def test_D(c2, n):
         d = c2[0,0]
-        d += self.test_xi(c2)*(c2[0,0] + c2[0,1])*((n[0]*n[1])**2 + (n[0]*n[2])**2 + (n[1]*n[2])**2)
-        d += self.test_xi(c2)**2 * (c2[0,0] + 2*c2[0,1] + c2[3,3])*(n[0]*n[1]*n[2])**2
+        d += EllipsoidalStrainEnergyBase.test_xi(c2)*(c2[0,0] + c2[0,1])*((n[0]*n[1])**2 + (n[0]*n[2])**2 + (n[1]*n[2])**2)
+        d += EllipsoidalStrainEnergyBase.test_xi(c2)**2 * (c2[0,0] + 2*c2[0,1] + c2[3,3])*(n[0]*n[1]*n[2])**2
         return d
 
     @staticmethod
     def test_ohm_cubic(params: MatrixElasticParameters, n):
         c2 = params.cmat_t2
         c4 = params.cmat_t4
-        xi = self.test_xi(c2)
-        D = self.test_D(c2, n)
+        xi = EllipsoidalStrainEnergyBase.test_xi(c2)
+        D = EllipsoidalStrainEnergyBase.test_D(c2, n)
         ohm = np.zeros((3,3))
         jk = [(1,2), (0,2), (0,1)]
         for i in range(3):
@@ -590,7 +590,7 @@ class EllipsoidalStrainEnergyBohm(EllipsoidalStrainEnergyBase):
         """
         V = 4*np.pi/3 * np.prod(radius)
         S = t4_to_t2(self.Sijmn(self.Dijkl(radius, params.cmat_t4), params.cmat_t4))
-        eigflat = t2_to_vec(eigenstrain)
+        eigflat = t2_to_vec(self.eigenstrain)
         inv_term = np.linalg.inv(np.matmul(self.cprec_t2 - self.cmat_t2, S) + self.cmat_t2)
         mult_term = np.matmul(inv_term, self.cprec_t2)
         stress_C = np.matmul(self.cmat_t2, np.matmul(np.matmul(S, mult_term), eigflat))
@@ -631,14 +631,14 @@ class AspectRatioSolver(ABC):
         return self.compute(rsph, gamma)
 
 class GoldenRatioSearchAspectRatio(AspectRatioSolver):
-    def __init__(self, strain: StrainEnergyDescription, params: MatrixElasticParameters, shape: ShapeDescription, ar_min = 1.00001, amax = 100):
+    def __init__(self, strain: StrainEnergyDescription, params: MatrixElasticParameters, shape: ShapeDescription, ar_min = 1.00001, ar_max = 100):
         super().__init__(strain, params, shape)
         self.ar_min = ar_min
         self.ar_max = ar_max
 
     def compute(self, rsph, gamma):
         f = lambda ar: self.strain.compute(self.params, self.shape.normal_radii(ar))*(4/3)*np.pi*rsph**3 + gamma*self.shape.thermo_factor(ar)*4*np.pi*rsph*2
-        return gr_search(f)
+        return self.gr_search(f)
 
     def gr_search(self, f):
         tol = 1e-3

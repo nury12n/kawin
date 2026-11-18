@@ -243,8 +243,8 @@ class Cylindrical1D(FiniteVolume1D):
 
     def flux_to_dxdt(self, fluxes):
         '''For cylindrical: dx/dt = -1/r dJ/dz'''
-        fr = fluxes*self.zEdge
-        return -(fr[1:] - fr[:-1]) / self.z / self.dz
+        fr = fluxes*self.edges[:,np.newaxis]
+        return -(fr[1:] - fr[:-1]) / self.z[:,np.newaxis] / self.dz
 
 class Spherical1D(FiniteVolume1D):
     def __init__(self, responses, rlim, N, compute_at_midpoint = False):
@@ -260,8 +260,8 @@ class Spherical1D(FiniteVolume1D):
 
     def flux_to_dxdt(self, fluxes):
         '''For spherical: dx/dt = -1/r^2 dJ/dz'''
-        fr = fluxes*self.zEdge**2
-        return -(fr[1:] - fr[:-1]) / self.z**2 / self.dz
+        fr = fluxes*self.edges[:,np.newaxis]**2
+        return -(fr[1:] - fr[:-1]) / self.z[:,np.newaxis]**2 / self.dz
 
 class Cartesian2D(MeshBase):
     '''

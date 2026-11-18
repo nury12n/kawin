@@ -89,19 +89,19 @@ def wiener_lower(mobility: np.array, phase_fracs: np.array) -> np.array:
     avg_mob = 1/np.sum(np.multiply(phase_fracs[:,np.newaxis], 1/(modified_mob)), axis=0)
     return avg_mob
 
-def labyrinth(labyrinth_factor: float = 1):
+def labyrinth_impl(mobility: np.array, phase_fracs: np.array, labyrinth_factor: float) -> np.array:
+    modified_mob = np.where(mobility != -1, mobility, np.finfo(np.float64).tiny)
+    avg_mob = np.sum(np.multiply(np.power(phase_fracs[:,np.newaxis], labyrinth_factor), modified_mob), axis=0)
+    return avg_mob
+
+def create_labyrinth(labyrinth_factor: float = 1) -> AveragingFunction:
     '''
-    Implements AveragingFunction
+    Creates an AveragingFunction
     Labyrinth mobility
     gamma^* = sum((f^alpha)^lab * gamma^alpha)
     '''
     labyrinth_factor = np.clip(labyrinth_factor, 1, 2, dtype=np.float32)
-    def _labyrinth(mobility: np.array, phase_fracs: np.array, labyrinth_factor: float = labyrinth_factor) -> np.array:
-        modified_mob = np.where(mobility != -1, mobility, np.finfo(np.float64).tiny)
-        avg_mob = np.sum(np.multiply(np.power(phase_fracs[:,np.newaxis], labyrinth_factor), modified_mob), axis=0)
-        return avg_mob
-
-    return _labyrinth
+    return lambda mobility, phase_fracs: labyrinth_impl(mobility, phase_fracs, labyrinth_factor)
 
 def _hashin_shtrikman_general(mobility: np.array, phase_fracs: np.array, extreme_mob: np.array) -> np.array:
     '''
@@ -151,26 +151,26 @@ def post_process_do_nothing(mob_data: MobilityData):
     '''
     return np.array(mob_data.mobility), np.array(mob_data.phase_fractions)
 
-def post_process_predefined_matrix_phase(phase: str):
+def post_process_predefined_matrix_phase_impl(mob_data: MobilityData, alpha_phase: str):
+    mobility, phases, phase_fractions = np.array(mob_data.mobility), np.array(mob_data.phases), np.array(mob_data.phase_fractions)
+    alpha_idx = np.squeeze(np.where(phases == alpha_phase)[0])
+    if len(alpha_idx.shape) > 0:
+        raise ValueError(f'{alpha_phase} must be stable as a single phase.')
+    for i in range(mobility.shape[0]):
+        if mobility[i][0] == -1:
+            mobility[i] = mobility[alpha_idx]
+    return mobility, phase_fractions
+
+def create_post_process_predefined_matrix_phase(phase: str) -> PostProcessFunction:
     '''
-    Implements PostProcessFunction
+    Creates a PostProcessFunction
     User will supply a predefined "alpha" phase, which the mobility is taken
     from for all undefined mobility
 
     Note: this assumes the user will know that "alpha" is continuously stable
     across the diffusion couple
     '''
-    def _post_process_predefined_matrix_phase(mob_data: MobilityData, alpha_phase: str = phase):
-        mobility, phases, phase_fractions = np.array(mob_data.mobility), np.array(mob_data.phases), np.array(mob_data.phase_fractions)
-        alpha_idx = np.squeeze(np.where(phases == alpha_phase)[0])
-        if len(alpha_idx.shape) > 0:
-            raise ValueError(f'{alpha_phase} must be stable as a single phase.')
-        for i in range(mobility.shape[0]):
-            if mobility[i][0] == -1:
-                mobility[i] = mobility[alpha_idx]
-        return mobility, phase_fractions
-
-    return _post_process_predefined_matrix_phase
+    return lambda mob_data: post_process_predefined_matrix_phase_impl(mob_data, phase)
 
 def post_process_majority_phase(mob_data: MobilityData):
     '''
@@ -185,24 +185,24 @@ def post_process_majority_phase(mob_data: MobilityData):
             mobility[i] = mobility[max_idx]
     return mobility, phase_fractions
 
-def post_process_exclude_phases(excluded_phases: str|list[str]):
+def post_process_exclude_phases_impl(mob_data: MobilityData, excluded_phases: list[str]):
+    mobility, phases, phase_fractions = np.array(mob_data.mobility), np.array(mob_data.phases), np.array(mob_data.phase_fractions)
+    for i in range(mobility.shape[0]):
+        if phases[i] in excluded_phases:
+            mobility[i] = 0
+            phase_fractions[i] = 0
+    return mobility, phase_fractions
+
+def create_post_process_exclude_phases(excluded_phases: str|list[str]) -> PostProcessFunction:
     '''
-    Implements PostProcessFunction
+    Creates a PostProcessFunction
     For all excluded phases, the mobility and phase fraction will be set to 0
     This assumes that user knows the excluded phases to be minor or that the
     mobility is unknown
     '''
     if isinstance(excluded_phases, str):
         excluded_phases = [excluded_phases]
-    def _post_process_exclude_phases(mob_data: MobilityData, excluded_phases: list[str] = excluded_phases):
-        mobility, phases, phase_fractions = np.array(mob_data.mobility), np.array(mob_data.phases), np.array(mob_data.phase_fractions)
-        for i in range(mobility.shape[0]):
-            if phases[i] in excluded_phases:
-                mobility[i] = 0
-                phase_fractions[i] = 0
-        return mobility, phase_fractions
-
-    return _post_process_exclude_phases
+    return lambda mob_data: post_process_exclude_phases_impl(mob_data, excluded_phases)
 
 def compute_mobility(therm: Thermodynamics, conditions: dict[v.StateVariable, float]) -> MobilityData:
     '''

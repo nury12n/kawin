@@ -1,5 +1,6 @@
 import copy
-from typing import Protocol, NamedTuple
+from typing import Protocol
+from collections import namedtuple
 from functools import wraps
 
 import numpy as np
@@ -35,6 +36,14 @@ class ExtraGibbsModel(Model):
     energy = GM = property(lambda self: self.ast + v.GE)
     formulaenergy = G = property(lambda self: (self.ast + v.GE) * self._site_ratio_normalization)
     orderingContribution = OCM = property(lambda self: self.models['ord'])
+
+EquilibriumCS = namedtuple(
+    'EquilibriumCS',
+    ['chemical_potentials', 'cs_matrix', 'cs_prec']
+    )
+
+def two_phase_cache_id(matrix_phase, prec_phase):
+    return f'cs_eq_{matrix_phase}_{prec_phase}'
 
 
 def _get_phase(phases: list[str], phase: str=None) -> str:
@@ -111,8 +120,8 @@ def local_equilibrium(
     SolverResult, list of composition sets
     '''
     # Broadcasting conditions not supported
-    cur_conds = {str(k): float(v) for k, v in conds.items()}
-    cur_conds = {k: v for k, v in conds.items()}
+    #cur_conds = {str(k): float(v) for k, v in conds.items()}
+    cur_conds = {k: np.squeeze(v) for k, v in conds.items()}
 
     # State variables are in alphabetical order
     if v.GE in cur_conds:
@@ -461,9 +470,9 @@ def get_local_eq(
         composition_sets=composition_sets, pdens=therm.local_pdens
         )
 
-def _get_cs_eq(
+def get_two_phase_eq(
         therm: Thermodynamics, conditions: dict[v.StateVariable, float|list[float]],
-        matrix_phase: str, prec_phase: str, cache: dict[str, any]) -> tuple[np.array, CompositionSet, CompositionSet]:
+        matrix_phase: str, prec_phase: str, cache: dict[str, any] = None) -> EquilibriumCS:
     """
     Gets composition set from x and T by global equilibrium
 
@@ -490,50 +499,70 @@ def _get_cs_eq(
     cs_matrix - composition set of matrix phase
     cs_precip - composition set of precipitate phase
     """
+    cache = {} if cache is None else cache
+
     # Takes list of composition sets and gets matrix composition, precipitate composition,
     # and whether there is a miscibility gap
     # If matrix or precipitate is unstable, then the composition set will be None
     def _process_composition_sets(composition_sets):
         cs_list_matrix = [cs for cs in composition_sets if cs.phase_record.phase_name == matrix_phase]
-        cs_list_precip = [cs for cs in composition_sets if cs.phase_record.phase_name == prec_phase]
+        cs_list_prec = [cs for cs in composition_sets if cs.phase_record.phase_name == prec_phase]
         cs_matrix = None if len(cs_list_matrix) == 0 else cs_list_matrix[0]
-        cs_precip = None if len(cs_list_precip) == 0 else cs_list_precip[0]
-        miscibility_gap = len(cs_list_matrix) > 1 or len(cs_list_precip) > 1
-        return cs_matrix, cs_precip, miscibility_gap
+        cs_prec = None if len(cs_list_prec) == 0 else cs_list_prec[0]
+        miscibility_gap = len(cs_list_matrix) > 1 or len(cs_list_prec) > 1
+        return cs_matrix, cs_prec, miscibility_gap
 
     # Updates a list of composition sets with new conditions
     # Return chemical potential, matrix comp set, precipitate comp set, and whether there is a miscibility gap
-    def _update_composition_sets(composition_sets):
-        #conditions = _process_conditions(conditions)
+    def _update_composition_sets(eq_cs: EquilibriumCS):
         phases, sub_models = generate_model_subset(therm, [matrix_phase, prec_phase])
+        composition_sets = [eq_cs.cs_matrix, eq_cs.cs_prec]
+        conds, num_conds = _process_conditions(conditions)
+        if num_conds > 1:
+            raise ValueError("Only one set of conditions is supported for two-phase eq")
         result, composition_sets = local_equilibrium(
             therm.dbf, therm.elements, phases,
-            conditions, sub_models, therm.phase_record_factory, composition_sets,
+            conds, sub_models, therm.phase_record_factory, composition_sets,
             therm.local_pdens
             )
-        cs_matrix, cs_precip, miscibility_gap = _process_composition_sets(composition_sets)
-        return result.chemical_potentials, cs_matrix, cs_precip, miscibility_gap
+        cs_matrix, cs_prec, miscibility_gap = _process_composition_sets(composition_sets)
+        return result.chemical_potentials, cs_matrix, cs_prec, miscibility_gap
 
     # If no cache exists, then compute global equilibrium, else, update cached composition sets
-    cache_id = f'{matrix_phase}_{prec_phase}'
+    cache_id = two_phase_cache_id(matrix_phase, prec_phase)
     if cache.get(cache_id, None) is None:
         wks = get_eq(therm, conditions, [matrix_phase, prec_phase])
-        cs_matrix, cs_precip, miscibility_gap = _process_composition_sets(wks.get_composition_sets())
+        cs_matrix, cs_prec, miscibility_gap = _process_composition_sets(wks.get_composition_sets())
         chemical_potentials = np.squeeze(wks.eq.MU)
     else:
-        chemical_potentials, cs_matrix, cs_precip, miscibility_gap = _update_composition_sets(cache[cache_id])
+        chemical_potentials, cs_matrix, cs_prec, miscibility_gap = _update_composition_sets(cache[cache_id])
 
     # If invalid equilibrium, then return None to denote that we cannot use this calculation
+    output = EquilibriumCS(
+        chemical_potentials=chemical_potentials,
+        cs_matrix=cs_matrix,
+        cs_prec=cs_prec
+    )
     if any(np.isnan(chemical_potentials)):
-        return None
+        output = None
 
-    # If the matrix or precipitate is unstable, then we return everything as usual
-    # This is in case we want to attempt to find a condition where the two phases are stable
-    if cs_matrix is None or cs_precip is None:
-        return chemical_potentials, cs_matrix, cs_precip
+    # # If the matrix or precipitate is unstable, then we return everything as usual
+    # # This is in case we want to attempt to find a condition where the two phases are stable
+    # if cs_matrix is None or cs_prec is None:
+    #     output = EquilibriumCS(
+    #         chemical_potentials=chemical_potentials,
+    #         cs_matrix=cs_matrix,
+    #         cs_prec=cs_prec
+    #     )
 
     # Check for miscibility gaps, if so, then compute local equilibrium with a single comp set of matrix and precipitate
     if miscibility_gap:
-        chemical_potentials, cs_matrix, cs_precip, miscibility_gap = _update_composition_sets([cs_matrix, cs_precip])
+        chemical_potentials, cs_matrix, cs_prec, miscibility_gap = _update_composition_sets([cs_matrix, cs_prec])
+        output = EquilibriumCS(
+            chemical_potentials=chemical_potentials,
+            cs_matrix=cs_matrix,
+            cs_prec=cs_prec
+        )
 
-    return chemical_potentials, cs_matrix, cs_precip
+    cache[cache_id] = output
+    return output

@@ -1,7 +1,6 @@
 import numpy as np
 import scipy.special as ssp
 
-# TODO: would this be better put in thermo.ostwald_ripening or precipitation.precipitation_parameters?
 def ohm(lam):
     """
     Supersaturation as a function of lambda

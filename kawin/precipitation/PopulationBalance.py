@@ -1,3 +1,4 @@
+from typing import Self
 import copy
 from pathlib import Path
 from abc import ABC, abstractmethod
@@ -20,40 +21,40 @@ class PSDState:
         return obj
 
     @staticmethod
-    def moment(state: PSDState, order, weights=None):
+    def moment(state: Self, order, weights=None):
         if weights is None:
             return np.sum(state.psd*state.sizes**order)
         else:
             return np.sum(weights*state.psd*state.sizes**order)
 
     @staticmethod
-    def cumulative_moment(state: PSDState, order, weights=None):
+    def cumulative_moment(state: Self, order, weights=None):
         if weights is None:
             return np.cumsum(state.psd*state.sizes**order)
         else:
             return np.cumsum(weights*state.psd*state.sizes**order)
 
     @staticmethod
-    def zero_moment(state: PSDState, weights=None):
-        return moment(state, 0, weights)
+    def zero_moment(state: Self, weights=None):
+        return PSDState.moment(state, 0, weights)
 
     @staticmethod
-    def first_moment(state: PSDState, weights=None):
-        return moment(state, 1, weights)
+    def first_moment(state: Self, weights=None):
+        return PSDState.moment(state, 1, weights)
 
     @staticmethod
-    def second_moment(state: PSDState, weights=None):
-        return moment(state, 2, weights)
+    def second_moment(state: Self, weights=None):
+        return PSDState.moment(state, 2, weights)
 
     @staticmethod
-    def third_moment(state: PSDState, weights=None):
-        return moment(state, 3, weights)
+    def third_moment(state: Self, weights=None):
+        return PSDState.moment(state, 3, weights)
 
 # Loosely follows a DifferentialEquationProcess,
 # but we compute dxdt from an external process rather than the state by itself
 # one of the goals here is that the KWN model should be agnostic to a Eulerian or Lagrangian implementation
 # so ideally, in a multiphase system, we should allow for one phase to be handled by a Eulerian PBM
-# and another be handled by a Lagrangian PBM
+# and another be handled by a Lagrangian PBM (not that there would be any reason to do so)
 class PBMModel(ABC):
     @abstractmethod
     def compute_dxdt(self, state: PSDState, drdt: any, nuc_rate: float, nuc_radius: float) -> any:
@@ -96,7 +97,7 @@ class EulerPBM:
 
         dxdt = flux[:-1] - flux[1:]
 
-        idx = np.argmax(psd.edges > nuc_radius) - 1
+        idx = np.argmax(state.edges > nuc_radius) - 1
         dxdt[idx] += nuc_rate
         return dxdt
 

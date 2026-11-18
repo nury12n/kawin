@@ -1,4 +1,5 @@
 from typing import Protocol
+from collections import namedtuple
 
 import numpy as np
 
@@ -38,6 +39,9 @@ class TracerDiffusivityFunction(Protocol):
     def squeeze(values: list[np.array]):
         return np.squeeze(values)
 
+def diffusivity_cache_id(phase):
+    return f'diff_{phase}'
+
 @enumerate_conditions(InterdiffusivityFunction.squeeze)
 def compute_interdiffusivity(
     therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
@@ -63,9 +67,8 @@ def compute_interdiffusivity(
         Where N is number of conditions, m is number of elements
     """
     phase = _get_phase(therm.phases, phase)
-    if cache is None:
-        cache = {}
-    composition_sets = cache.get(f'{phase}_diff', None)
+    cache = {} if cache is None else cache
+    composition_sets = cache.get(diffusivity_cache_id(phase), None)
     result, composition_sets = get_local_eq(therm, conditions, [phase], composition_sets=composition_sets)
     cs_matrix = composition_sets[0]
     chemical_potentials = result.chemical_potentials
@@ -109,9 +112,8 @@ def compute_chemical_diffusivity(
         Where N is number of conditions, m is number of elements
     """
     phase = _get_phase(therm.phases, phase)
-    if cache is None:
-        cache = {}
-    composition_sets = cache.get(f'{phase}_diff', None)
+    cache = {} if cache is None else cache
+    composition_sets = cache.get(diffusivity_cache_id(phase), None)
     result, composition_sets = get_local_eq(therm, conditions, [phase], composition_sets=composition_sets)
     cs_matrix = composition_sets[0]
     chemical_potentials = result.chemical_potentials
@@ -151,10 +153,8 @@ def compute_tracer_diffusivity(
     Tracer diffusivity for all elements
     """
     phase = _get_phase(therm.phases, phase)
-    if cache is None:
-        cache = {}
-
-    composition_sets = cache.get(f'{phase}_diff', None)
+    cache = {} if cache is None else cache
+    composition_sets = cache.get(diffusivity_cache_id(phase), None)
     result, composition_sets = get_local_eq(therm, conditions, [phase], composition_sets=composition_sets)
     cs_matrix = composition_sets[0]
 

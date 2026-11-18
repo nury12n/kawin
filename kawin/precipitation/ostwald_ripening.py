@@ -2,11 +2,12 @@ from collections import namedtuple
 from typing import Protocol
 
 import numpy as np
+import scipy.special as ssp
 
 from pycalphad import variables as v
 from pycalphad.core.composition_set import CompositionSet
 
-from kawin.thermo.thermodynamics import Thermodynamics, _full_comp_from_conditions, _get_cs_eq
+from kawin.thermo.thermodynamics import Thermodynamics, _full_comp_from_conditions, get_two_phase_eq, two_phase_cache_id, EquilibriumCS
 from kawin.thermo.diffusivity import compute_interdiffusivity
 from kawin.thermo.interfacial_composition import InterfacialCompositionFunction, compute_interfacial_composition_equilibrium
 from kawin.thermo.driving_force import DrivingForceOutput, DrivingForceFunction, compute_driving_force_tangent
@@ -49,6 +50,65 @@ class GrowthRateFunction(Protocol):
             cache: dict[str, any]=None, **kwargs) -> GrowthRateOutput:
         ...
 
+def binary_composition_cache_id(matrix_phase, prec_phase):
+    return f'bin_comp_{matrix_phase}_{prec_phase}'
+
+def curvature_cache_id(matrix_phase, prec_phase):
+    return f'curvature_{matrix_phase}_{prec_phase}'
+
+def omega(lam):
+    """
+    Supersaturation as a function of lambda
+    """
+    # note: erfcx(x) = exp(x^2)*erfc(x)
+    return 2*lam**2 - 2*np.sqrt(np.pi)*lam**3*ssp.erfcx(lam)
+
+def lamda_low(omega):
+    """
+    Lambda when supersaturation approaches 0
+    """
+    return np.sqrt(omega/2)
+
+def lambda_high(omega):
+    """
+    Lambda when supersaturation approaches 1
+    """
+    return np.sqrt(3/2*(1-omega))
+
+class EffectiveDiffusionDistanceLookupTable:
+    def __init__(self, n, lam_min, lam_max):
+        self.lam = np.logspace(lam_min, lam_max, n)
+        self.omega = omega(self.lam)
+        self.eff_dist = self.omega/(2*self.lam**2)
+        self.omega = np.concatenate(([0], self.omega, [1]))
+        self.eff_dist = np.concatenate(([1], self.eff_dist, [0]))
+
+def effective_diffusion_distance(omega):
+    """
+    Effective diffusion distance given supersaturation
+    This gives a constant to be multiplied by the particle radius during growth rate
+
+    The effective diffusion distance is given by
+    eps = omega/2*lambda^2
+
+    Where Q is the super saturation and lambda is given by
+    omega = 2*lambda^2 - 2*lambda^3 * sqrt(pi) * exp(lambda^2) * erfc(lambda)
+
+    We use a lookup table here for efficiency
+
+    Parameters
+    ----------
+    omega: supersaturation
+        (x - x_P) / (x_M - x_P) where x is matrix composition, x_M is parent composition and x_P is precipitate composition
+    """
+    return np.interp(omega, effective_diffusion_distance.table.omega, effective_diffusion_distance.table.eff_dist)
+
+# function attributes just seem weird, but it effectively allows for "static" variables in functions
+# this lets us make this function as a standalone without a class implementation
+# values are selected here that give a max error of ~1e-5
+#   this is based off sweeping the supersaturation from 0 to 1 at an interval of 1e-5
+effective_diffusion_distance.table = EffectiveDiffusionDistanceLookupTable(n=1000, lam_min=-6, lam_max=1)
+
 def compute_growth_rate_binary(
         therm: Thermodynamics, conditions: dict[v.StateVariable, float],
         matrix_phase: str, prec_phase: str, ref_element: str,
@@ -61,16 +121,17 @@ def compute_growth_rate_binary(
     obtain it directly from interfacial composition
 
     Omega (supersaturation) = (x - x_alpha) / (Vm_alpha/Vm_beta * x_beta - x_alpha)
-    dR/dt = D/R * Omega
+    dR/dt = D/R * Omega / xi
+
+    xi is correction factor for the effective diffusion distance from the
+    radius at high supersaturations. During coarsening, supersaturation->0 and xi->1
 
     This function can also be modified:
       - Non-spherical particles: dR/dt = f(R) * dR_sph/dt
       - Effective diffusion: dR/dt = dR_ideal/dt / xi(Omega)
     """
-    if cache is None:
-        cache = {}
-
-    cache_id = f'{matrix_phase}_{prec_phase}_bin_comp'
+    cache = {} if cache is None else cache
+    cache_id = binary_composition_cache_id(matrix_phase, prec_phase)
     int_comp = cache.get(cache_id, None)
     if int_comp is None:
         conditions[v.GE] = g_extra
@@ -101,7 +162,7 @@ def compute_growth_rate_binary(
     non_zero = xb > 0
     omega[non_zero] = (xs-xa[non_zero])/(xb[non_zero]-xa[non_zero])
     return GrowthRateOutput(
-        growth_rate=D/r*omega,
+        growth_rate=D/r*omega/effective_diffusion_distance(omega),
         x_alpha=xa,
         x_beta=xb,
         x_eq_alpha=xeqa,
@@ -110,7 +171,7 @@ def compute_growth_rate_binary(
 
 def _search_for_two_phase_eq(
         therm: Thermodynamics, conditions: dict[v.StateVariable, float],
-        matrix_phase: str, prec_phase: str, cache: dict[str, any]={},
+        matrix_phase: str, prec_phase: str, cache: dict[str, any],
         driving_force_output: DrivingForceOutput=None, driving_force_func: DrivingForceFunction=None, **kwargs):
     '''
     Given x and a search direction (which should correspond to the composition of precipitate from driving force calc)
@@ -136,31 +197,30 @@ def _search_for_two_phase_eq(
     for i, e in defined_elements.items():
         conds[v.X(e)] = curr_x[i]
 
-    currIt = 0
-    #MaxIt is 15, which refers to a maximum of 6e-5 difference in test composition between the 14th and 15th iteration
+    curr_it = 0
+    # max_it is 15, which refers to a maximum of 6e-5 difference in test composition between the 14th and 15th iteration
     #    Which is probably more than enough to find a two-phase region
-    maxIt = 15
-    while currIt < maxIt:
-        eq_results = _get_cs_eq(therm, conds, matrix_phase, prec_phase, cache)
-        if eq_results is None:
+    max_it = 15
+    while curr_it < max_it:
+        eq_cs = get_two_phase_eq(therm, conds, matrix_phase, prec_phase, {})
+        if eq_cs is None:
             return None
-        chemical_potentials, cs_matrix, cs_precip = eq_results
         # If matrix and precipitate are both stable, then return composition sets
-        if cs_matrix is not None and cs_precip is not None:
-            return chemical_potentials, cs_matrix, cs_precip
+        if eq_cs.cs_matrix is not None and eq_cs.cs_prec is not None:
+            return eq_cs
         # If only matrix is stable, then move currX towards searchDir
-        elif cs_precip is None:
+        elif eq_cs.cs_prec is None:
             curr_x = 0.5*curr_x + 0.5*search_dir
         # If only precipitate is stable, then move currX towards x
-        elif cs_matrix is None:
+        elif eq_cs.cs_matrix is None:
             curr_x = 0.5*curr_x + 0.5*x_init
         else:
             return None
 
         for i, e in defined_elements.items():
-                conds[v.X(e)] = curr_x[i]
+            conds[v.X(e)] = curr_x[i]
 
-        currIt += 1
+        curr_it += 1
 
     return None
 
@@ -196,40 +256,40 @@ def _growth_rate_from_curvature(x, r, g_extra, curvature: CurvatureOutput):
 def _curvature_factor_from_eq(
         therm: Thermodynamics, x_full: list[float],
         matrix_phase: str, prec_phase: str, ref_element: str,
-        chemical_potentials: list[float], cs_matrix: CompositionSet, cs_prec: CompositionSet,
+        eq_cs: EquilibriumCS,
         driving_force_output: DrivingForceOutput=None
-        ):
+        ) -> CurvatureOutput:
     if therm.mobility_callables.get(matrix_phase, None) is None:
         Dnkj, dmudx_matrix, inv_mob = mob_funcs.inverse_mobility_from_diffusivity(
-            chemical_potentials, cs_matrix,
+            eq_cs.chemical_potentials, eq_cs.cs_matrix,
             ref_element, therm.diffusivity_callables[matrix_phase],
             diffusivity_correction=therm.mobility_correction, parameters=therm.parameters
             )
 
         #NOTE: This is note tested yet
         dtrace = mob_funcs.tracer_diffusivity_from_diff(
-            cs_matrix, therm.diffusivity_callables[matrix_phase],
+            eq_cs.cs_matrix, therm.diffusivity_callables[matrix_phase],
             diffusivity_correction=therm.mobility_correction, parameters=therm.parameters
             )
     else:
         Dnkj, dmudx_matrix, inv_mob = mob_funcs.inverse_mobility(
-            chemical_potentials, cs_matrix,
+            eq_cs.chemical_potentials, eq_cs.cs_matrix,
             ref_element, therm.mobility_callables[matrix_phase],
             mobility_correction=therm.mobility_correction,
             vacancy_poor_interstitial_sublattice=therm.vacancy_poor_interstitial_sublattice.get(matrix_phase, False),
             parameters=therm.parameters
             )
         dtrace = mob_funcs.tracer_diffusivity(
-            cs_matrix, therm.mobility_callables[matrix_phase],
+            eq_cs.cs_matrix, therm.mobility_callables[matrix_phase],
             mobility_correction=therm.mobility_correction, parameters=therm.parameters)
 
     ref_index = therm.nonvacant_elements.index(ref_element)
     x = np.delete(x_full, ref_index)
-    xm_full = np.array(cs_matrix.X)
+    xm_full = np.array(eq_cs.cs_matrix.X)
     xm = np.delete(xm_full, ref_index)
 
-    dmudx_prec = mob_funcs.total_dmudx(chemical_potentials, cs_prec, ref_element)
-    xp_full = np.array(cs_prec.X)
+    dmudx_prec = mob_funcs.total_dmudx(eq_cs.chemical_potentials, eq_cs.cs_prec, ref_element)
+    xp_full = np.array(eq_cs.cs_prec.X)
     xp = np.delete(xp_full, ref_index)
     dxbar_full = np.array([xp_full - xm_full])
     dxbar = np.array([xp - xm])
@@ -278,7 +338,9 @@ def compute_curvature(
         therm: Thermodynamics, conditions: dict[v.StateVariable, float],
         matrix_phase: str, prec_phase: str, ref_element: str,
         cache: dict[str, any]=None,
-        driving_force_output: DrivingForceOutput=None, driving_force_func: DrivingForceFunction=None, **kwargs):
+        driving_force_output: DrivingForceOutput=None,
+        driving_force_func: DrivingForceFunction=None,
+        **kwargs) -> CurvatureOutput:
     """
     Computes factors for computing growth rate:
         mc = 1 / (dx_bar^T * inv(M) * dx_bar)
@@ -302,35 +364,30 @@ def compute_curvature(
             print(f'Warning: {calc_source} equilibrum was not able to be solved for, using results of previous calculation')
             return curvature_cache
 
-    if cache is None:
-        cache = {}
+    cache = {} if cache is None else cache
+    eq_cache_id = two_phase_cache_id(matrix_phase, prec_phase)
+    curv_cache_id = curvature_cache_id(matrix_phase, prec_phase)
 
-    eq_cache_id = f'{matrix_phase}_{prec_phase}'
-    curvature_cache_id = f'{matrix_phase}_{prec_phase}_curvature'
+    cs_eq = get_two_phase_eq(therm, conditions, matrix_phase, prec_phase, cache)
 
-    eq_results = _get_cs_eq(therm, conditions, matrix_phase, prec_phase, cache)
-
-    if eq_results is None:
-        return _process_invalid_eq('cached', cache[eq_cache_id], cache[curvature_cache_id])
-
-    chemical_potentials, cs_matrix, cs_prec = eq_results
+    if cs_eq is None:
+        return _process_invalid_eq('cached', cache[eq_cache_id], cache[curv_cache_id])
 
     # If either the matrix of precipitate is unstable, then search for two-phase equilibria
-    if cs_matrix is None or cs_prec is None:
-        eq_results = _search_for_two_phase_eq(therm, conditions, matrix_phase, prec_phase, cache, driving_force_output, driving_force_func, **kwargs)
-        if eq_results is None:
-            return _process_invalid_eq('search', cache[eq_cache_id], cache[curvature_cache_id])
+    if cs_eq.cs_matrix is None or cs_eq.cs_prec is None:
+        cache[eq_cache_id] = None
+        cs_eq = _search_for_two_phase_eq(therm, conditions, matrix_phase, prec_phase, cache, driving_force_output, driving_force_func, **kwargs)
+        if cs_eq is None:
+            return _process_invalid_eq('search', cache[eq_cache_id], cache[curv_cache_id])
 
-        chemical_potentials, cs_matrix, cs_prec = eq_results
-
-    cache[eq_cache_id] = [cs_matrix, cs_prec]
+    cache[eq_cache_id] = cs_eq
 
     x_full = _full_comp_from_conditions(conditions, therm.nonvacant_elements)
-    cache[curvature_cache_id] = _curvature_factor_from_eq(
+    cache[curv_cache_id] = _curvature_factor_from_eq(
         therm, x_full, matrix_phase, prec_phase, ref_element,
-        chemical_potentials, cs_matrix, cs_prec, driving_force_output
+        cs_eq, driving_force_output
     )
-    return cache[curvature_cache_id]
+    return cache[curv_cache_id]
 
 
 def compute_growth_rate_curvature(
@@ -342,10 +399,13 @@ def compute_growth_rate_curvature(
     """
     Assume small supersaturations, the growth rate can be determined from the
     curvature of the Gibbs free energy. This works for any number of components
-    """
-    if cache is None:
-        cache = {}
 
+    Note that because we assume the system is at a low supersaturation, the
+    effective diffusion distance that is applied in the binary system is
+    not applied here since the low supersaturation assumption means that
+    we also assume that the effective diffusion distance is near unity
+    """
+    cache = {} if cache is None else cache
     curv_factor = compute_curvature(
         therm, conditions, matrix_phase, prec_phase, ref_element,
         cache, driving_force_output, driving_force_func, **kwargs

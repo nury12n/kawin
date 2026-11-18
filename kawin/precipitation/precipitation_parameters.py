@@ -1,6 +1,8 @@
 from typing import Protocol
 from dataclasses import dataclass, field
 
+import numpy as np
+
 from kawin.precipitation.parameters.volume import Volume
 from kawin.precipitation.parameters.shape_factors import ShapeDescription, SphereDescription
 from kawin.precipitation.parameters.strain_energy import StrainEnergyDescription, MatrixElasticParameters, ConstantStrainEnergy, elastic_constants_to_t2
@@ -57,6 +59,13 @@ class PrecipitateParameters:
     infinite_precipitate_diffusion: bool = True
     r_min: float = 3e-10
     r_driving_force_limit: float = 0
+
+def gibbs_thompson_contribution(mat: MatrixParameters, prec: PrecipitateParameters, radii):
+    ar = prec.ar_function(radii, prec.gamma)
+    nr = prec.shape.normal_radii(ar)
+    strain = prec.strain_energy.compute(mat.elastic_parameters, nr)
+    thermo_factor = prec.shape.thermo_factor(ar)
+    return prec.volume.vm * (strain + 2*thermo_factor*prec.gamma / radii)
 
 # import numpy as np
 

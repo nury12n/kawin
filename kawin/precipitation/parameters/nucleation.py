@@ -266,7 +266,7 @@ class NucleationSites:
 
     @staticmethod
     def dislocation_n0(dislocation_density: float, vm: float):
-        return disocation_density*NucleationSites.site_density(vm, 1)
+        return dislocation_density*NucleationSites.site_density(vm, 1)
 
     @staticmethod
     def gb_area_density(radius: float, aspect_ratio: float):
@@ -296,7 +296,7 @@ class NucleationSites:
 
     @staticmethod
     def gb_corner_n0(radius: float, aspect_ratio: float, vm: float):
-        return Nucleationsites.gb_corner_density(radius, aspect_ratio)
+        return NucleationSites.gb_corner_density(radius, aspect_ratio)
 
 # class NucleationDescriptionBase (ABC):
 #     name = 'ABSTRACT NUCLEATION DESCRIPTION'

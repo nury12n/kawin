@@ -174,12 +174,12 @@ class AspectRatioFunction(Protocol):
         ...
 
 def find_rcrit_scalar(shp: ShapeDescription, rcrit_sphere: float, ar_func: AspectRatioFunction) -> float:
-    return rcrit_sphere*self.thermo_factor(ar_func(rcrit_sphere))
+    return rcrit_sphere*shp.thermo_factor(ar_func(rcrit_sphere))
 
 def find_rcrit(shp: ShapeDescription, rcrit_sphere: float, ar_func: AspectRatioFunction, rmax: float = None) -> float:
     # objective function is R = R_sphere*thermo_factor(ar_func(r))
     # or R/(R_sphere*thermo_factor) - 1 = 0
-    f = lambda r: r/(rcrit_sphere*self.thermo_factor(ar_func(r))) - 1
+    f = lambda r: r/(rcrit_sphere*shp.thermo_factor(ar_func(r))) - 1
 
     if rmax is None:
         rmax = 10*rcrit_sphere
