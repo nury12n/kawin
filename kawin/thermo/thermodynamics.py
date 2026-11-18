@@ -32,9 +32,10 @@ class ExtraGibbsModel(Model):
     Subclass of pycalphad Model with extra variable GE
         GE represents any extra contribution to the Gibbs free energy
         such as the Gibbs-Thomson contribution
+    Model.ast is per mole-formula, GE is per mole-atom
     """
-    energy = GM = property(lambda self: self.ast + v.GE)
-    formulaenergy = G = property(lambda self: (self.ast + v.GE) * self._site_ratio_normalization)
+    energy = GM = property(lambda self: self.ast/self._site_ratio_normalization + v.GE)
+    formulaenergy = G = property(lambda self: self.ast + v.GE * self._site_ratio_normalization)
     orderingContribution = OCM = property(lambda self: self.models['ord'])
 
 EquilibriumCS = namedtuple(
@@ -380,6 +381,26 @@ def generate_model_subset(therm: Thermodynamics, phases: str | list[str]=None) -
     therm.phase_record_factory.models = sub_models
     return phases, sub_models
 
+class TDependentFunction(Protocol):
+    def __call__(self, T: float) -> float:
+        pass
+
+def _generate_T_dependent_function(therm: Thermodynamics, func: TDependentFunction):
+    index = therm.state_variables.index(v.T)
+    return lambda dof: func(dof[index])
+
+def set_manual_mobility(therm: Thermodynamics, func: TDependentFunction, phase: str, element: str = None):
+    if element is None:
+        therm.mobility_callables[phase] = {e: _generate_T_dependent_function(therm, func) for e in therm.nonvacant_elements}
+    else:
+        therm.mobility_callables[phase][element] = _generate_T_dependent_function(therm, func)
+
+def set_manual_diffusivity(therm: Thermodynamics, func: TDependentFunction, phase: str, element: str = None):
+    if element is None:
+        therm.diffusivity_callables[phase] = {e: _generate_T_dependent_function(therm, func) for e in therm.nonvacant_elements}
+    else:
+        therm.diffusivity_callables[phase][element] = _generate_T_dependent_function(therm, func)
+
 class ThermodynamicFunction(Protocol):
     def __call__(
             self, therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
@@ -403,6 +424,14 @@ def enumerate_conditions(squeeze_function = lambda x: x):
             return squeeze_function(results)
         return wrapper
     return decorator
+
+def squeeze_np_array(x): return np.squeeze(x)
+
+def squeeze_tuple(num_items):
+    return lambda outputs: tuple(np.squeeze([o[i] for o in outputs]) for i in range(num_items))
+
+def squeeze_named_tuple(obj: namedtuple):
+    return lambda outputs: obj(*[np.squeeze([getattr(o,f) for o in outputs]) for f in obj._fields])
 
 def get_eq(
         therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],

@@ -389,13 +389,13 @@ def compute_curvature(
     )
     return cache[curv_cache_id]
 
-
 def compute_growth_rate_curvature(
         therm: Thermodynamics, conditions: dict[v.StateVariable, float],
         matrix_phase: str, prec_phase: str, ref_element: str,
         r: float | list[float], g_extra: float | list[float],
         cache: dict[str, any]=None,
-        driving_force_output: DrivingForceOutput=None, driving_force_func: DrivingForceFunction=None, **kwargs) -> GrowthRateOutput:
+        driving_force_output: DrivingForceOutput=None, driving_force_func: DrivingForceFunction=compute_driving_force_tangent,
+        **kwargs) -> GrowthRateOutput:
     """
     Assume small supersaturations, the growth rate can be determined from the
     curvature of the Gibbs free energy. This works for any number of components

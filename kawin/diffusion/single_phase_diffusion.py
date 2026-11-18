@@ -2,7 +2,7 @@ import numpy as np
 
 from pycalphad import variables as v
 
-from kawin.thermo.thermodynamics import Thermodynamics
+from kawin.thermo.thermodynamics import Thermodynamics, squeeze_np_array
 from kawin.thermo.mobility import expand_u_frac, u_to_x_frac, interstitials
 from kawin.thermo.diffusivity import InterdiffusivityFunction, compute_interdiffusivity
 
@@ -30,7 +30,7 @@ class SinglePhaseModel(DiffusionModel):
         self.conditions = kwargs.get("conditions", dict())
         self.diffusivity_function = diffusivity_function
         if self.diffusivity_function is None:
-            self.diffusivity_function = LookupTable(compute_interdiffusivity, squeeze_function=InterdiffusivityFunction.squeeze)
+            self.diffusivity_function = LookupTable(compute_interdiffusivity, squeeze_function=squeeze_np_array)
 
         # utility
         self.cache = dict()

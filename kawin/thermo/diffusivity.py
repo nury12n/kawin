@@ -6,7 +6,7 @@ import numpy as np
 from pycalphad import variables as v
 from pycalphad.core.composition_set import CompositionSet
 
-from kawin.thermo.thermodynamics import Thermodynamics, enumerate_conditions, _get_phase, get_local_eq
+from kawin.thermo.thermodynamics import Thermodynamics, enumerate_conditions, squeeze_np_array, _get_phase, get_local_eq
 import kawin.thermo.mobility as mob_funcs
 
 class InterdiffusivityFunction(Protocol):
@@ -15,19 +15,11 @@ class InterdiffusivityFunction(Protocol):
             ref_element: str=None, phase: str=None, cache: dict[str, any]={}, **kwargs) -> np.array:
         ...
 
-    @staticmethod
-    def squeeze(values: list[np.array]):
-        return np.squeeze(values)
-
 class ChemicalDiffusivityFunction(Protocol):
     def __call__(
             self, therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
             phase: str=None, cache: dict[str, any]={}, **kwargs) -> np.array:
         ...
-
-    @staticmethod
-    def squeeze(values: list[np.array]):
-        return np.squeeze(values)
 
 class TracerDiffusivityFunction(Protocol):
     def __call__(
@@ -35,14 +27,10 @@ class TracerDiffusivityFunction(Protocol):
             phase: str=None, cache: dict[str, any]={}, **kwargs) -> np.array:
         ...
 
-    @staticmethod
-    def squeeze(values: list[np.array]):
-        return np.squeeze(values)
-
 def diffusivity_cache_id(phase):
     return f'diff_{phase}'
 
-@enumerate_conditions(InterdiffusivityFunction.squeeze)
+@enumerate_conditions(squeeze_np_array)
 def compute_interdiffusivity(
     therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
     ref_element: str, phase: str=None, cache: dict[str, list[CompositionSet]]=None, **kwargs) -> np.array:
@@ -91,7 +79,7 @@ def compute_interdiffusivity(
     cache[f'{phase}_diff'] = composition_sets
     return Dnkj
 
-@enumerate_conditions(ChemicalDiffusivityFunction.squeeze)
+@enumerate_conditions(squeeze_np_array)
 def compute_chemical_diffusivity(
     therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
     phase: str=None, cache: dict[str, list[CompositionSet]]=None, **kwargs) -> np.array:
@@ -133,7 +121,7 @@ def compute_chemical_diffusivity(
     cache[f'{phase}_diff'] = composition_sets
     return Dkj
 
-@enumerate_conditions(TracerDiffusivityFunction.squeeze)
+@enumerate_conditions(squeeze_np_array)
 def compute_tracer_diffusivity(
     therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
     phase: str=None, cache: dict[str, list[CompositionSet]]={}, **kwargs) -> np.array:

@@ -30,17 +30,6 @@ def vectorize_gb_factors(func):
     return wrapper
 
 class NucleationDescription(ABC):
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        if 'gb_removal' in cls.__dict__:
-            cls.gb_removal = vectorize_gb_factors(cls.__dict__['gb_removal'])
-        if 'area_factor' in cls.__dict__:
-            cls.area_factor = vectorize_gb_factors(cls.__dict__['area_factor'])
-        if 'volume_factor' in cls.__dict__:
-            cls.volume_factor = vectorize_gb_factors(cls.__dict__['volume_factor'])
-        if 'area_removal' in cls.__dict__:
-            cls.area_removal = vectorize_gb_factors(cls.__dict__['area_removal'])
-
     @abstractmethod
     def gb_removal(self, gamma: float, gb_energy: float = 0.3):
         """
@@ -62,6 +51,7 @@ class NucleationDescription(ABC):
         """
         pass
 
+    @vectorize_gb_factors
     def area_removal(self, gamma: float, gb_energy: float = 0.3):
         """
         Factor to multiply by r to get radius of eliminated GB area
@@ -80,15 +70,19 @@ class NucleationDescription(ABC):
         return gb_energy / (2*gamma)
 
 class BulkDescription(NucleationDescription):
+    @vectorize_gb_factors
     def gb_removal(self, gamma: float, gb_energy: float = 0.3):
         return 0
 
+    @vectorize_gb_factors
     def area_factor(self, gamma: float, gb_energy: float = 0.3):
         return 4*np.pi
 
+    @vectorize_gb_factors
     def volume_factor(self, gamma: float, gb_energy: float = 0.3):
         return 4*np.pi/3
 
+    @vectorize_gb_factors
     def area_removal(self, dg: float, gamma: float, gb_energy: float = 0.3):
         return 1
 
@@ -114,18 +108,21 @@ class GrainBoundaryDescription(GrainDescriptionBase):
     def max_ratio(self):
         return 1
 
+    @vectorize_gb_factors
     def gb_removal(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
         if gbk > self.max_ratio:
             return np.nan
         return np.pi*(1-gbk**2)
 
+    @vectorize_gb_factors
     def area_factor(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
         if gbk > self.max_ratio:
             return np.nan
         return 4*np.pi*(1-gbk)
 
+    @vectorize_gb_factors
     def volume_factor(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
         if gbk > self.max_ratio:
@@ -143,6 +140,7 @@ class GrainEdgeDescription(GrainDescriptionBase):
     def beta(self, gbk):
         return np.arccos(gbk/np.sqrt(3*(1-gbk**2)))
 
+    @vectorize_gb_factors
     def gb_removal(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
         if gbk > self.max_ratio:
@@ -150,6 +148,7 @@ class GrainEdgeDescription(GrainDescriptionBase):
         beta = self.beta(gbk)
         return 3*beta*(1-gbk**2) - gbk*np.sqrt(3-4*gbk**2)
 
+    @vectorize_gb_factors
     def area_factor(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
         if gbk > self.max_ratio:
@@ -158,6 +157,7 @@ class GrainEdgeDescription(GrainDescriptionBase):
         beta = self.beta(gbk)
         return 12*(np.pi/2 - alpha - gbk*beta)
 
+    @vectorize_gb_factors
     def volume_factor(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
         if gbk > self.max_ratio:
@@ -182,6 +182,7 @@ class GrainCornerDescription(GrainDescriptionBase):
         K = self.K(gbk)
         return np.arccos((np.sqrt(2)-gbk*np.sqrt(3-K**2)) / (K*np.sqrt(1-gbk**2)))
 
+    @vectorize_gb_factors
     def gb_removal(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
         if gbk > self.max_ratio:
@@ -190,6 +191,7 @@ class GrainCornerDescription(GrainDescriptionBase):
         phi = self.phi(gbk)
         return 3*(2*phi*(1-gbk**2) - K*(np.sqrt(1-gbk**2-K**2/4) - K**2/np.sqrt(8)))
 
+    @vectorize_gb_factors
     def area_factor(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
         if gbk > self.max_ratio:
@@ -198,6 +200,7 @@ class GrainCornerDescription(GrainDescriptionBase):
         delta = self.delta(gbk)
         return 24*(np.pi/3 - gbk*phi - delta)
 
+    @vectorize_gb_factors
     def volume_factor(self, gamma: float, gb_energy: float = 0.3):
         gbk = self.compute_gbk(gamma, gb_energy)
         if gbk > self.max_ratio:

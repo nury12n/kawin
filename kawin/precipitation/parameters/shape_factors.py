@@ -39,27 +39,18 @@ from typing import Protocol
 
 import numpy as np
 
-def vectorize_aspect_ratio(func, signature=None):
-    @wraps(func)
-    def wrapper(self, ar):
-        ar = np.atleast_1d(ar)
-        ar[ar < 1] = 1
-        f = lambda ar: func(self, ar)
-        return np.squeeze(np.vectorize(f, otypes=[np.float32], signature=signature)(ar))
-    return wrapper
+def vectorize_aspect_ratio(signature=None):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, ar):
+            ar = np.atleast_1d(ar)
+            ar[ar < 1] = 1
+            f = lambda ar: func(self, ar)
+            return np.squeeze(np.vectorize(f, otypes=[np.float32], signature=signature)(ar))
+        return wrapper
+    return decorator
 
 class ShapeDescription(ABC):
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        if 'eq_radius' in cls.__dict__:
-            cls.eq_radius = vectorize_aspect_ratio(cls.__dict__['eq_radius'])
-        if 'normal_radii' in cls.__dict__:
-            cls.normal_radii = vectorize_aspect_ratio(cls.__dict__['normal_radii'], signature='()->(3)')
-        if 'kinetic_factor' in cls.__dict__:
-            cls.kinetic_factor = vectorize_aspect_ratio(cls.__dict__['kinetic_factor'])
-        if 'thermo_factor' in cls.__dict__:
-            cls.thermo_factor = vectorize_aspect_ratio(cls.__dict__['thermo_factor'])
-
     @abstractmethod
     def eq_radius(self, ar):
         """
@@ -96,32 +87,40 @@ class ShapeDescription(ABC):
         return np.sqrt(1 - 1/ar**2)
 
 class SphereDescription(ShapeDescription):
+    @vectorize_aspect_ratio()
     def eq_radius(self, ar):
         return 1
 
+    @vectorize_aspect_ratio(signature='()->(3)')
     def normal_radii(self, ar):
         return np.cbrt(3/(4*np.pi))*np.ones(3)
 
+    @vectorize_aspect_ratio()
     def kinetic_factor(self, ar):
         return 1
 
+    @vectorize_aspect_ratio()
     def thermo_factor(self, ar):
         return 1
 
 class NeedleDescription(ShapeDescription):
+    @vectorize_aspect_ratio()
     def eq_radius(self, ar):
         return np.cbrt(ar)
 
+    @vectorize_aspect_ratio(signature='()->(3)')
     def normal_radii(self, ar):
         scale = np.cbrt(1/ar)
         return np.cbrt(3/(4*np.pi))*np.array([scale, scale, scale*ar])
 
+    @vectorize_aspect_ratio()
     def kinetic_factor(self, ar):
         if ar <= 1:
             return 1
         ecc = self.eccentricity(ar)
         return 2*np.cbrt(ar**2)*ecc / (np.log(1+ecc)-np.log(1-ecc))
 
+    @vectorize_aspect_ratio()
     def thermo_factor(self, ar):
         if ar <= 1:
             return 1
@@ -129,13 +128,16 @@ class NeedleDescription(ShapeDescription):
         return 1/(2*ar**(2/3)) * (1 + ar/ecc*np.arcsin(ecc))
 
 class PlateDescription(ShapeDescription):
+    @vectorize_aspect_ratio()
     def eq_radius(self, ar):
         return np.cbrt(ar**2)
 
+    @vectorize_aspect_ratio(signature='()->(3)')
     def normal_radii(self, ar):
         scale = np.cbrt(1/ar**2)
         return np.cbrt(3/(4*np.pi))*np.array([scale*ar, scale*ar, scale])
 
+    @vectorize_aspect_ratio()
     def kinetic_factor(self, ar):
         if ar <= 1:
             return 1
@@ -144,6 +146,7 @@ class PlateDescription(ShapeDescription):
         #return ecc*np.cbrt(ar) / (np.arccos(0) - np.arccos(ecc))
         #return ecc*np.cbrt(ar) / np.arccos(1/ar)
 
+    @vectorize_aspect_ratio()
     def thermo_factor(self, ar):
         if ar <= 1:
             return 1
@@ -151,18 +154,22 @@ class PlateDescription(ShapeDescription):
         return 1/(2*ar**(4/3)) * (ar**2 + 1/(2*ecc)*np.log((1+ecc)/(1-ecc)))
 
 class CuboidalDescription(ShapeDescription):
+    @vectorize_aspect_ratio()
     def eq_radius(self, ar):
         return np.cbrt(3*ar/(4*np.pi))
 
+    @vectorize_aspect_ratio(signature='()->(3)')
     def normal_radii(self, ar):
         scale = np.cbrt(1/ar)
         return np.array([scale, scale, scale*ar])
 
+    @vectorize_aspect_ratio()
     def kinetic_factor(self, ar):
         if ar <= 1:
             return 0.1 + 0.5*1.736
         return 0.1*np.exp(-0.091*(ar-1)) + 1.736*np.sqrt(ar**2-1) / (np.cbrt(ar)*np.log(2*ar**2 + 2*ar*np.sqrt(ar**2-1)-1))
 
+    @vectorize_aspect_ratio()
     def thermo_factor(self, ar):
         return (2*ar+1)/(2*np.pi) * (4*np.pi/(3*ar))**(2/3)
 

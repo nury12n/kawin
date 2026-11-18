@@ -7,7 +7,7 @@ from kawin.precipitation.parameters.volume import Volume
 from kawin.precipitation.parameters.shape_factors import ShapeDescription, SphereDescription
 from kawin.precipitation.parameters.strain_energy import StrainEnergyDescription, MatrixElasticParameters, ConstantStrainEnergy, elastic_constants_to_t2
 from kawin.precipitation.parameters.strain_energy import AspectRatioFunction, ConstantAspectRatio
-from kawin.precipitation.parameters.nucleation import NucleationDescription, BulkDescription
+from kawin.precipitation.parameters.nucleation import NucleationDescription, DislocationDescription
 
 class PrecipitationModelTemperature(Protocol):
     def __call__(self, time: float|list[float]) -> float|list[float]:
@@ -31,7 +31,7 @@ class HeatTreatmentProfile:
 @dataclass
 class MatrixParameters:
     phase: str
-    composition: dict[str, float]
+    solutes: list[str]
     volume: Volume
 
     elastic_parameters: MatrixElasticParameters = field(default_factory=lambda: MatrixElasticParameters(elastic_constants_to_t2(0,0,0)))
@@ -42,9 +42,6 @@ class MatrixParameters:
     gb_energy: float = 0.3
     theta: float = 2
 
-    def __post_init__(self):
-        self.solutes = [key for key in self.composition.keys()]
-
 @dataclass
 class PrecipitateParameters:
     phase: str
@@ -52,7 +49,7 @@ class PrecipitateParameters:
     volume: Volume
     shape: ShapeDescription = field(default_factory=lambda: SphereDescription())
     strain_energy: StrainEnergyDescription = field(default_factory=lambda: ConstantStrainEnergy(0))
-    nucleation_site: NucleationDescription = field(default_factory=lambda: BulkDescription())
+    nucleation_site: NucleationDescription = field(default_factory=lambda: DislocationDescription())
     ar_function: AspectRatioFunction = field(default_factory=lambda: ConstantAspectRatio())
     parent_phase: list[str] = field(default_factory=lambda: list)
 

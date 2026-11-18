@@ -6,7 +6,7 @@ import numpy as np
 from pycalphad import calculate, variables as v
 from pycalphad.core.composition_set import CompositionSet
 
-from kawin.thermo.thermodynamics import Thermodynamics, enumerate_conditions, generate_model_subset, _full_comp_from_conditions
+from kawin.thermo.thermodynamics import Thermodynamics, enumerate_conditions, squeeze_named_tuple, generate_model_subset, _full_comp_from_conditions
 from kawin.thermo.thermodynamics import local_equilibrium, get_local_eq, get_two_phase_eq, two_phase_cache_id, EquilibriumCS
 import kawin.thermo.mobility as mob_funcs
 
@@ -26,13 +26,6 @@ class DrivingForceFunction(Protocol):
             matrix_phase: str, prec_phase: str,
             local_phase_sampling_conditions: dict[v.StateVariable, float]=None, cache: dict[str, any]={}, **kwargs) -> DrivingForceOutput:
         ...
-
-    @staticmethod
-    def squeeze(values: list[DrivingForceOutput]) -> DrivingForceOutput:
-        return DrivingForceOutput(
-            driving_force=np.squeeze([val.driving_force for val in values]),
-            x_beta=np.squeeze([val.x_beta for val in values])
-        )
 
 def precipitate_samples_cache_id(phase):
     return f'samples_{phase}'
@@ -176,7 +169,7 @@ def _sample_precipitate_cs(
 
     return dg, prec_cs
 
-@enumerate_conditions(DrivingForceFunction.squeeze)
+@enumerate_conditions(squeeze_named_tuple(DrivingForceOutput))
 def compute_driving_force_sampling(
     therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
     matrix_phase: str, prec_phase: str,
@@ -228,7 +221,7 @@ def compute_driving_force_sampling(
         x_beta=np.squeeze(beta_x)
     )
 
-@enumerate_conditions(DrivingForceFunction.squeeze)
+@enumerate_conditions(squeeze_named_tuple(DrivingForceOutput))
 def compute_driving_force_approximate(
     therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
     matrix_phase: str, prec_phase: str,
@@ -285,7 +278,7 @@ def compute_driving_force_approximate(
         x_beta=np.squeeze(xp)
     )
 
-@enumerate_conditions(DrivingForceFunction.squeeze)
+@enumerate_conditions(squeeze_named_tuple(DrivingForceOutput))
 def driving_force_curvature_impl(
     therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
     matrix_phase: str, prec_phase: str,
@@ -359,7 +352,7 @@ def driving_force_curvature_impl(
 def create_compute_driving_force_curvature(ref_element: str) -> DrivingForceFunction:
     return lambda therm, conds, mat, prec, loc_ph_conds=None, cache=None, **kwargs: driving_force_curvature_impl(therm, conds, mat, prec, loc_ph_conds, cache, ref_element, **kwargs)
 
-@enumerate_conditions(DrivingForceFunction.squeeze)
+@enumerate_conditions(squeeze_named_tuple(DrivingForceOutput))
 def compute_driving_force_tangent(
     therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
     matrix_phase: str, prec_phase: str,

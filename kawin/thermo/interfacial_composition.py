@@ -5,7 +5,7 @@ import numpy as np
 
 from pycalphad import variables as v
 
-from kawin.thermo.thermodynamics import Thermodynamics, enumerate_conditions, get_eq, _full_comp_from_conditions
+from kawin.thermo.thermodynamics import Thermodynamics, enumerate_conditions, squeeze_named_tuple, get_eq, _full_comp_from_conditions
 from kawin.thermo.free_energy_hessian import total_dmudx
 
 InterfacialCompositionOutput = namedtuple(
@@ -19,14 +19,7 @@ class InterfacialCompositionFunction(Protocol):
             matrix_phase: str, prec_phase: str, **kwargs) -> InterfacialCompositionOutput:
         ...
 
-    @staticmethod
-    def squeeze(values: list[InterfacialCompositionOutput]) -> InterfacialCompositionOutput:
-        return InterfacialCompositionOutput(
-            x_alpha=np.squeeze([val.x_alpha for val in values]),
-            x_beta=np.squeeze([val.x_beta for val in values])
-        )
-
-@enumerate_conditions(InterfacialCompositionFunction.squeeze)
+@enumerate_conditions(squeeze_named_tuple(InterfacialCompositionOutput))
 def compute_interfacial_composition_equilibrium(
         therm: Thermodynamics, conditions: dict[v.StateVariable, float|list[float]],
         matrix_phase: str, prec_phase: str, guess_conditions: dict[v.StateVariable, float]=None, **kwargs) -> InterfacialCompositionOutput:
@@ -63,7 +56,7 @@ def compute_interfacial_composition_equilibrium(
         x_beta=np.array(cs_prec[0].X, dtype=np.float64)
     )
 
-@enumerate_conditions(InterfacialCompositionFunction.squeeze)
+@enumerate_conditions(squeeze_named_tuple(InterfacialCompositionOutput))
 def interfacial_composition_curvature_impl(
         therm: Thermodynamics, conditions: dict[v.StateVariable, float|list[float]],
         matrix_phase: str, prec_phase: str, ref_element: str=None, **kwargs) -> InterfacialCompositionOutput:

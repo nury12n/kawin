@@ -5,7 +5,7 @@ import numpy as np
 from pycalphad import variables as v
 
 from kawin.constants import GAS_CONSTANT
-from kawin.thermo.thermodynamics import Thermodynamics, get_eq, enumerate_conditions
+from kawin.thermo.thermodynamics import Thermodynamics, get_eq, enumerate_conditions, squeeze_tuple
 from kawin.thermo.mobility import expand_u_frac, u_to_x_frac, x_to_u_frac, mobility_from_composition_set, interstitials
 from kawin.diffusion.diffusion import DiffusionModel, DiffusionState, LookupTable, DiffusionModelTemperature, IsothermalTemperature
 from kawin.diffusion.mesh.mesh_base import MeshBase, DiffusionPair, arithmetic_mean, log_mean, harmonic_mean
@@ -231,10 +231,10 @@ def compute_mobility(therm: Thermodynamics, conditions: dict[v.StateVariable, fl
 
     return MobilityData(mobility = mob, phases = phases, phase_fractions = phase_fracs, chemical_potentials=chemical_potentials)
 
-def squeeze_homogenization_results(values):
-    return np.squeeze([vals[0] for vals in values]), np.squeeze([vals[1] for vals in values])
+# def squeeze_homogenization_results(values):
+#     return np.squeeze([vals[0] for vals in values]), np.squeeze([vals[1] for vals in values])
 
-@enumerate_conditions(squeeze_homogenization_results)
+@enumerate_conditions(squeeze_tuple(2))
 def compute_homogenization_function(
         therm : Thermodynamics, conditions: dict[v.StateVariable, float],
         mobility_func: MobilityFunction = compute_mobility,
