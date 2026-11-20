@@ -1,5 +1,6 @@
 from typing import Protocol
 from collections import namedtuple
+import functools
 
 import numpy as np
 
@@ -56,10 +57,9 @@ def compute_interfacial_composition_equilibrium(
         x_beta=np.array(cs_prec[0].X, dtype=np.float64)
     )
 
-@enumerate_conditions(squeeze_named_tuple(InterfacialCompositionOutput))
 def interfacial_composition_curvature_impl(
-        therm: Thermodynamics, conditions: dict[v.StateVariable, float|list[float]],
-        matrix_phase: str, prec_phase: str, ref_element: str=None, **kwargs) -> InterfacialCompositionOutput:
+        ref_element: str, therm: Thermodynamics, conditions: dict[v.StateVariable, float|list[float]],
+        matrix_phase: str, prec_phase: str, **kwargs) -> InterfacialCompositionOutput:
     """
     Gets interfacial composition between matrix and precipitate phase. This extrapolates
     from the matrix composition using the Gibbs free energy curvature, solving for x_m and x_p
@@ -139,4 +139,6 @@ def interfacial_composition_curvature_impl(
     )
 
 def create_compute_interfacial_composition_curvature(ref_element: str) -> InterfacialCompositionFunction:
-    return lambda therm, conds, mat, prec, **kwargs: interfacial_composition_curvature_impl(therm, conds, mat, prec, ref_element, **kwargs)
+    func = functools.partial(interfacial_composition_curvature_impl, ref_element)
+    functools.update_wrapper(func, interfacial_composition_curvature_impl)
+    return enumerate_conditions(squeeze_named_tuple(InterfacialCompositionOutput))(func)

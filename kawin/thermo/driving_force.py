@@ -1,5 +1,6 @@
 from typing import Protocol
 from collections import namedtuple
+import functools
 
 import numpy as np
 
@@ -278,12 +279,11 @@ def compute_driving_force_approximate(
         x_beta=np.squeeze(xp)
     )
 
-@enumerate_conditions(squeeze_named_tuple(DrivingForceOutput))
 def driving_force_curvature_impl(
-    therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
+    ref_element: str, therm: Thermodynamics, conditions: dict[v.StateVariable, float | list[float]],
     matrix_phase: str, prec_phase: str,
     local_phase_sampling_conditions: dict[str, v.StateVariable]=None, cache: dict[str, any]=None,
-    ref_element: str=None, **kwargs) -> DrivingForceOutput:
+    **kwargs) -> DrivingForceOutput:
     """
     Gets driving force from curvature of free energy function
     Assumes small saturation
@@ -328,10 +328,7 @@ def driving_force_curvature_impl(
     x_precip = np.array(eq_cs.cs_prec.X, dtype=np.float64)
     # need reference for N-1 dependency with total derivatives in simplex space. For precipitation, we take the largest
     # composition assuming the alloy is in a corner
-    if ref_element is None:
-        ref_index = np.argmax(x_full)
-    else:
-        ref_index = therm.nonvacant_elements.index(ref_element)
+    ref_index = therm.nonvacant_elements.index(ref_element)
 
     # If in two phase region, then get curvature of parent phase and use it to calculate driving force
     dmudx_parent = mob_funcs.total_dmudx(eq_cs.chemical_potentials, eq_cs.cs_matrix, eq_cs.cs_matrix.phase_record.nonvacant_elements[ref_index])
@@ -350,7 +347,12 @@ def driving_force_curvature_impl(
     )
 
 def create_compute_driving_force_curvature(ref_element: str) -> DrivingForceFunction:
-    return lambda therm, conds, mat, prec, loc_ph_conds=None, cache=None, **kwargs: driving_force_curvature_impl(therm, conds, mat, prec, loc_ph_conds, cache, ref_element, **kwargs)
+    func = functools.partial(driving_force_curvature_impl, ref_element)
+    functools.update_wrapper(func, driving_force_curvature_impl)
+    return enumerate_conditions(squeeze_named_tuple(DrivingForceOutput))(func)
+    #return enumerate_conditions(squeeze_named_tuple(DrivingForceOutput))(functools.partial(driving_force_curvature_impl, ref_element))
+    #return functools.partial(driving_force_curvature_impl, ref_element)
+    #return lambda therm, conds, mat, prec, loc_ph_conds=None, cache=None, **kwargs: driving_force_curvature_impl(therm, conds, mat, prec, loc_ph_conds, cache, ref_element, **kwargs)
 
 @enumerate_conditions(squeeze_named_tuple(DrivingForceOutput))
 def compute_driving_force_tangent(

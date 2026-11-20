@@ -1,5 +1,6 @@
 from typing import Protocol
 from collections import namedtuple
+import functools
 
 import numpy as np
 
@@ -120,11 +121,11 @@ def beta_binary_simple(
     return beta
 
 def beta_binary_general_impl(
+        interfacial_comp_function: InterfacialCompositionFunction,
         therm: Thermodynamics, conditions: dict[v.StateVariable, float],
         r_crit: float, dg_vol: VolumeDrivingForce,
         mat: MatrixParameters, prec: PrecipitateParameters,
         cache: dict[str, any] = None,
-        interfacial_comp_function: InterfacialCompositionFunction = compute_interfacial_composition_equilibrium,
         x_eq: InterfacialCompositionOutput = None,
         *args, **kwargs) -> float:
     cache = {} if cache is None else cache
@@ -140,15 +141,14 @@ def beta_binary_general_impl(
 def create_beta_binary_general(
         interfacial_comp_function: InterfacialCompositionFunction = compute_interfacial_composition_equilibrium
         ) -> BetaFunction:
-    return lambda therm, conds, r_crit, dg_vol, mat, prec, cache, *args, **kwargs: \
-        beta_binary_general_impl(therm, conds, r_crit, dg_vol, mat, prec, cache, interfacial_comp_function, None, *args, **kwargs)
+    return functools.partial(beta_binary_general_impl, interfacial_comp_function)
 
 def beta_multi_impl(
+        driving_force_function: DrivingForceFunction,
         therm: Thermodynamics, conditions: dict[v.StateVariable, float],
         r_crit: float, dg_vol: VolumeDrivingForce,
         mat: MatrixParameters, prec: PrecipitateParameters,
         cache: dict[str, any] = None,
-        driving_force_function: DrivingForceFunction = compute_driving_force_tangent,
         *args, **kwargs) -> float:
     ref_element = list(set(therm.nonvacant_elements) - set(mat.solutes))[0]
     dg = DrivingForceOutput(driving_force=dg_vol.dg_chem, x_beta=dg_vol.x_beta)
@@ -158,8 +158,7 @@ def beta_multi_impl(
 def create_beta_multi(
         driving_force_function: DrivingForceFunction = compute_driving_force_tangent
         ) -> BetaFunction:
-    return lambda therm, conds, r_crit, dg_vol, mat, prec, cache, *args, **kwargs: \
-        beta_multi_impl(therm, conds, r_crit, dg_vol, mat, prec, cache, driving_force_function, *args, **kwargs)
+    return functools.partial(beta_multi_impl, driving_force_function)
 
 def incubation_time(beta: float, z: float, theta: float = 2) -> float:
     beta = np.atleast_1d(beta)

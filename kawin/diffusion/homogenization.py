@@ -1,5 +1,7 @@
 from typing import Protocol
 from collections import namedtuple
+import functools
+
 import numpy as np
 
 from pycalphad import variables as v
@@ -89,7 +91,7 @@ def wiener_lower(mobility: np.array, phase_fracs: np.array) -> np.array:
     avg_mob = 1/np.sum(np.multiply(phase_fracs[:,np.newaxis], 1/(modified_mob)), axis=0)
     return avg_mob
 
-def labyrinth_impl(mobility: np.array, phase_fracs: np.array, labyrinth_factor: float) -> np.array:
+def labyrinth_impl(labyrinth_factor: float, mobility: np.array, phase_fracs: np.array) -> np.array:
     modified_mob = np.where(mobility != -1, mobility, np.finfo(np.float64).tiny)
     avg_mob = np.sum(np.multiply(np.power(phase_fracs[:,np.newaxis], labyrinth_factor), modified_mob), axis=0)
     return avg_mob
@@ -101,7 +103,7 @@ def create_labyrinth(labyrinth_factor: float = 1) -> AveragingFunction:
     gamma^* = sum((f^alpha)^lab * gamma^alpha)
     '''
     labyrinth_factor = np.clip(labyrinth_factor, 1, 2, dtype=np.float32)
-    return lambda mobility, phase_fracs: labyrinth_impl(mobility, phase_fracs, labyrinth_factor)
+    return functools.partial(labyrinth_impl, labyrinth_factor)
 
 def _hashin_shtrikman_general(mobility: np.array, phase_fracs: np.array, extreme_mob: np.array) -> np.array:
     '''
@@ -151,7 +153,7 @@ def post_process_do_nothing(mob_data: MobilityData):
     '''
     return np.array(mob_data.mobility), np.array(mob_data.phase_fractions)
 
-def post_process_predefined_matrix_phase_impl(mob_data: MobilityData, alpha_phase: str):
+def post_process_predefined_matrix_phase_impl(alpha_phase: str, mob_data: MobilityData):
     mobility, phases, phase_fractions = np.array(mob_data.mobility), np.array(mob_data.phases), np.array(mob_data.phase_fractions)
     alpha_idx = np.squeeze(np.where(phases == alpha_phase)[0])
     if len(alpha_idx.shape) > 0:
@@ -170,7 +172,7 @@ def create_post_process_predefined_matrix_phase(phase: str) -> PostProcessFuncti
     Note: this assumes the user will know that "alpha" is continuously stable
     across the diffusion couple
     '''
-    return lambda mob_data: post_process_predefined_matrix_phase_impl(mob_data, phase)
+    return functools.partial(post_process_predefined_matrix_phase_impl, phase)
 
 def post_process_majority_phase(mob_data: MobilityData):
     '''
@@ -185,7 +187,7 @@ def post_process_majority_phase(mob_data: MobilityData):
             mobility[i] = mobility[max_idx]
     return mobility, phase_fractions
 
-def post_process_exclude_phases_impl(mob_data: MobilityData, excluded_phases: list[str]):
+def post_process_exclude_phases_impl(excluded_phases: list[str], mob_data: MobilityData):
     mobility, phases, phase_fractions = np.array(mob_data.mobility), np.array(mob_data.phases), np.array(mob_data.phase_fractions)
     for i in range(mobility.shape[0]):
         if phases[i] in excluded_phases:
@@ -202,7 +204,7 @@ def create_post_process_exclude_phases(excluded_phases: str|list[str]) -> PostPr
     '''
     if isinstance(excluded_phases, str):
         excluded_phases = [excluded_phases]
-    return lambda mob_data: post_process_exclude_phases_impl(mob_data, excluded_phases)
+    return functools.partial(post_process_exclude_phases_impl, excluded_phases)
 
 def compute_mobility(therm: Thermodynamics, conditions: dict[v.StateVariable, float]) -> MobilityData:
     '''
@@ -230,9 +232,6 @@ def compute_mobility(therm: Thermodynamics, conditions: dict[v.StateVariable, fl
             mob[p,:] *= x_to_u_frac(np.array(cs.X, dtype=np.float64), therm.nonvacant_elements, interstitials)
 
     return MobilityData(mobility = mob, phases = phases, phase_fractions = phase_fracs, chemical_potentials=chemical_potentials)
-
-# def squeeze_homogenization_results(values):
-#     return np.squeeze([vals[0] for vals in values]), np.squeeze([vals[1] for vals in values])
 
 @enumerate_conditions(squeeze_tuple(2))
 def compute_homogenization_function(
